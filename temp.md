@@ -1,184 +1,100 @@
-Here's a **complete step-by-step example** to create a **Cloud Run service that is private** and make it **accessible from a GKE pod**:
+Here’s a complete Markdown (`.md`) file sample for a **Pull Request (PR) template** tailored for an Azure Function project:
+
+```markdown
+# Pull Request Template
+
+## **Pull Request Title**
+<!-- Provide a descriptive title for this PR -->
+`<Feature/bug/task description>`
 
 ---
 
-## **1. Create a VPC Network and Subnet**
-
-### **Create a custom VPC Network:**
-```bash
-gcloud compute networks create my-vpc \
-    --subnet-mode=custom
-```
-
-### **Create a Subnet in the VPC:**
-```bash
-gcloud compute networks subnets create my-subnet \
-    --network=my-vpc \
-    --region=REGION \
-    --range=10.0.0.0/24
-```
+## **Description**
+<!-- A concise summary of the changes in this PR -->
+- **What does this PR do?**  
+  - `<Explain what is being added, updated, or fixed>`  
+- **Why are these changes needed?**  
+  - `<Explain the reasoning behind the changes>`  
 
 ---
 
-## **2. Set Up GKE Cluster**
+## **Checklist**
+Please ensure that the following requirements are met before submitting the PR:
 
-### **Create a GKE Cluster in the VPC:**
-```bash
-gcloud container clusters create my-gke-cluster \
-    --region=REGION \
-    --network=my-vpc \
-    --subnetwork=my-subnet \
-    --workload-pool=PROJECT_ID.svc.id.goog
-```
-
-### **Get Cluster Credentials:**
-```bash
-gcloud container clusters get-credentials my-gke-cluster \
-    --region=REGION
-```
+- [ ] Code builds successfully without errors.
+- [ ] Unit tests cover the new or updated functionality.
+- [ ] Unit tests and integration tests pass successfully.
+- [ ] All code changes are documented with comments or inline documentation.
+- [ ] Logging and exception handling are implemented appropriately.
+- [ ] Code adheres to the [team's coding standards](<link_to_coding_standards>).
 
 ---
 
-## **3. Create a VPC Connector**
-
-### **Create a VPC Connector for Cloud Run:**
-```bash
-gcloud compute networks vpc-access connectors create my-vpc-connector \
-    --region=REGION \
-    --network=my-vpc \
-    --range=10.8.0.0/28
-```
+## **Related Work Items**
+<!-- Link Azure DevOps work items or GitHub issues -->
+- **Work Items:**  
+  - `<Link to Azure DevOps Work Item>`  
+- **Bugs/Issues:**  
+  - `<Link to Azure DevOps Bug/Issue>`  
 
 ---
 
-## **4. Deploy a Private Cloud Run Service**
-
-### **Deploy a Cloud Run Service:**
-```bash
-gcloud run deploy my-cloud-run-service \
-    --image=gcr.io/PROJECT_ID/my-image \
-    --region=REGION \
-    --vpc-connector=my-vpc-connector \
-    --ingress=internal \
-    --allow-unauthenticated
-```
-
-### **Verify the Service URL:**
-```bash
-gcloud run services describe my-cloud-run-service \
-    --region=REGION \
-    --format="value(status.url)"
-```
-The URL will look like this:  
-`https://my-cloud-run-service-<ID>.a.run.internal`
+## **Testing Details**
+<!-- Provide information on how the changes were tested -->
+- **Test Scenarios:**  
+  - `<Describe scenario 1>`  
+  - `<Describe scenario 2>`  
+  - `<Describe any edge cases>`  
+- **Evidence of Testing:**  
+  - Attach screenshots or provide test results/logs where applicable.  
 
 ---
 
-## **5. Configure Private DNS for Cloud Run**
-
-### **Create a Private DNS Zone:**
-```bash
-gcloud dns managed-zones create private-cloud-run \
-    --dns-name="a.run.internal." \
-    --visibility=private \
-    --networks=my-vpc
-```
+## **Impact Analysis**
+<!-- Provide details of the potential impact -->
+- Are there any dependencies on other systems/modules?  
+  - `<Yes/No>`  
+- What are the potential risks?  
+  - `<Describe risks>`  
 
 ---
 
-## **6. Grant GKE Access to Cloud Run**
+## **Deployment Notes**
+<!-- Highlight any changes needed for deployment -->
+- **Azure Resource Updates:**  
+  - [ ] No changes.  
+  - [ ] Configuration updates: `<Describe changes>`  
+  - [ ] New Function App settings: `<Describe changes>`  
 
-### **Find the GKE Node Service Account:**
-```bash
-gcloud container clusters describe my-gke-cluster \
-    --region=REGION \
-    --format="value(nodeConfig.serviceAccount)"
-```
-
-### **Grant `roles/run.invoker` Permission:**
-```bash
-gcloud run services add-iam-policy-binding my-cloud-run-service \
-    --member=serviceAccount:<GKE_NODE_SERVICE_ACCOUNT> \
-    --role=roles/run.invoker
-```
+- **Pipeline Updates:**  
+  - [ ] No changes.  
+  - [ ] Updated pipelines: `<Describe changes>`  
 
 ---
 
-## **7. Deploy a GKE Pod to Access Cloud Run**
-
-### **Create a Deployment in GKE:**
-Save the following YAML file as `pod-access-cloud-run.yaml`:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: cloud-run-client
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: cloud-run-client
-  template:
-    metadata:
-      labels:
-        app: cloud-run-client
-    spec:
-      containers:
-      - name: curl-container
-        image: curlimages/curl:latest
-        command: ["/bin/sh", "-c", "sleep 3600"]
-        env:
-        - name: CLOUD_RUN_URL
-          value: "https://my-cloud-run-service-<ID>.a.run.internal"
-```
-
-### **Apply the Deployment:**
-```bash
-kubectl apply -f pod-access-cloud-run.yaml
-```
-
-### **Verify the Pod is Running:**
-```bash
-kubectl get pods
-```
+## **Screenshots**
+<!-- Attach screenshots if applicable -->
+- `<Add any relevant images/logs here>`  
 
 ---
 
-## **8. Test Access to Cloud Run**
-
-### **Open a Shell in the Pod:**
-```bash
-kubectl exec -it $(kubectl get pods -l app=cloud-run-client -o jsonpath='{.items[0].metadata.name}') -- /bin/sh
-```
-
-### **Fetch the Cloud Run Service:**
-Generate an identity token and call the service:
-```bash
-TOKEN=$(curl -H "Metadata-Flavor: Google" \
-  http://metadata/computeMetadata/v1/instance/service-accounts/default/identity?audience=https://my-cloud-run-service-<ID>.a.run.internal)
-
-curl -H "Authorization: Bearer $TOKEN" $CLOUD_RUN_URL
-```
+## **Additional Notes**
+<!-- Include any other relevant information -->
+- `<Add additional context for the reviewers here>`  
 
 ---
 
-## **9. Debug and Verify**
-
-- Ensure DNS is resolving the `a.run.internal` domain inside the GKE pod:
-  ```bash
-  nslookup my-cloud-run-service-<ID>.a.run.internal
-  ```
-
-- Ensure IAM permissions are correct for the GKE service account.
-
-- Ensure the firewall allows communication from GKE to the VPC Connector subnet.
+## **Reviewers**
+<!-- Assign appropriate reviewers -->
+- @Reviewer1  
+- @Reviewer2  
+- @Reviewer3  
 
 ---
 
-### **Considerations**
-- **Scaling:** Ensure the VPC connector and Cloud Run have sufficient capacity for concurrent connections.
-- **Security:** Use Workload Identity to avoid hardcoding credentials.
-- **Timeouts:** Adjust timeout settings in both GKE and Cloud Run to prevent disconnections.
+Thank you for your contribution! 🎉
+```
 
-Let me know if you need further assistance!
+### **Usage**
+- Save this file as `PULL_REQUEST_TEMPLATE.md` in the root of your `.azuredevops` or `.github` folder, depending on your repository type.
+- This template will automatically populate the PR description for all new PRs in your repository.
