@@ -1,100 +1,112 @@
-Here’s a complete Markdown (`.md`) file sample for a **Pull Request (PR) template** tailored for an Azure Function project:
-
-```markdown
-# Pull Request Template
-
-## **Pull Request Title**
-<!-- Provide a descriptive title for this PR -->
-`<Feature/bug/task description>`
+In Terraform, you can capture the value of an output variable or resource attribute, then use it to configure additional resources dynamically. Here's how you can achieve that:
 
 ---
 
-## **Description**
-<!-- A concise summary of the changes in this PR -->
-- **What does this PR do?**  
-  - `<Explain what is being added, updated, or fixed>`  
-- **Why are these changes needed?**  
-  - `<Explain the reasoning behind the changes>`  
+### **1. Capturing an Output Variable Value**
+Define an **output** in your module or Terraform configuration to capture a specific value:
 
----
-
-## **Checklist**
-Please ensure that the following requirements are met before submitting the PR:
-
-- [ ] Code builds successfully without errors.
-- [ ] Unit tests cover the new or updated functionality.
-- [ ] Unit tests and integration tests pass successfully.
-- [ ] All code changes are documented with comments or inline documentation.
-- [ ] Logging and exception handling are implemented appropriately.
-- [ ] Code adheres to the [team's coding standards](<link_to_coding_standards>).
-
----
-
-## **Related Work Items**
-<!-- Link Azure DevOps work items or GitHub issues -->
-- **Work Items:**  
-  - `<Link to Azure DevOps Work Item>`  
-- **Bugs/Issues:**  
-  - `<Link to Azure DevOps Bug/Issue>`  
-
----
-
-## **Testing Details**
-<!-- Provide information on how the changes were tested -->
-- **Test Scenarios:**  
-  - `<Describe scenario 1>`  
-  - `<Describe scenario 2>`  
-  - `<Describe any edge cases>`  
-- **Evidence of Testing:**  
-  - Attach screenshots or provide test results/logs where applicable.  
-
----
-
-## **Impact Analysis**
-<!-- Provide details of the potential impact -->
-- Are there any dependencies on other systems/modules?  
-  - `<Yes/No>`  
-- What are the potential risks?  
-  - `<Describe risks>`  
-
----
-
-## **Deployment Notes**
-<!-- Highlight any changes needed for deployment -->
-- **Azure Resource Updates:**  
-  - [ ] No changes.  
-  - [ ] Configuration updates: `<Describe changes>`  
-  - [ ] New Function App settings: `<Describe changes>`  
-
-- **Pipeline Updates:**  
-  - [ ] No changes.  
-  - [ ] Updated pipelines: `<Describe changes>`  
-
----
-
-## **Screenshots**
-<!-- Attach screenshots if applicable -->
-- `<Add any relevant images/logs here>`  
-
----
-
-## **Additional Notes**
-<!-- Include any other relevant information -->
-- `<Add additional context for the reviewers here>`  
-
----
-
-## **Reviewers**
-<!-- Assign appropriate reviewers -->
-- @Reviewer1  
-- @Reviewer2  
-- @Reviewer3  
-
----
-
-Thank you for your contribution! 🎉
+```hcl
+output "captured_name" {
+  value = google_cloud_run_service.example_service.name
+}
 ```
 
-### **Usage**
-- Save this file as `PULL_REQUEST_TEMPLATE.md` in the root of your `.azuredevops` or `.github` folder, depending on your repository type.
-- This template will automatically populate the PR description for all new PRs in your repository.
+When you apply your Terraform configuration, you can reference this output programmatically in subsequent configurations or resources.
+
+---
+
+### **2. Using the Captured Output**
+You can use the captured value directly as an input for another resource. Here's an example:
+
+#### Example: Capture a Cloud Run Service Name and Use It in a Pub/Sub Subscription
+```hcl
+resource "google_cloud_run_service" "example_service" {
+  name     = "my-cloud-run-service"
+  location = "us-central1"
+
+  template {
+    spec {
+      containers {
+        image = "gcr.io/my-project/my-image:latest"
+      }
+    }
+  }
+}
+
+resource "google_pubsub_topic" "example_topic" {
+  name = "example-topic"
+}
+
+# Create a subscription with the captured name as part of its ID
+resource "google_pubsub_subscription" "example_subscription" {
+  name  = "${google_cloud_run_service.example_service.name}-subscription"
+  topic = google_pubsub_topic.example_topic.name
+}
+
+output "captured_service_name" {
+  value = google_cloud_run_service.example_service.name
+}
+```
+
+---
+
+### **3. Using Variables for Dynamic Configuration**
+If you're working with multiple configurations, you can combine the output into a variable to dynamically configure resources:
+
+```hcl
+variable "cloud_run_service_name" {
+  description = "Name of the Cloud Run service"
+  type        = string
+}
+
+resource "google_cloud_run_service_iam_member" "invoker" {
+  service  = var.cloud_run_service_name
+  location = "us-central1"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:my-service-account@my-project.iam.gserviceaccount.com"
+}
+```
+
+To pass the captured value:
+```hcl
+module "dynamic_resources" {
+  source = "./modules/resource_module"
+
+  cloud_run_service_name = google_cloud_run_service.example_service.name
+}
+```
+
+---
+
+### **4. Dynamically Configure Additional Resources**
+If you want to append or modify a value for new resources:
+```hcl
+# Example appending a suffix to the captured name
+resource "google_storage_bucket" "example_bucket" {
+  name     = "${google_cloud_run_service.example_service.name}-bucket"
+  location = "US"
+}
+```
+
+---
+
+### **5. Viewing the Captured Output**
+To view an output value after `terraform apply`, run:
+```bash
+terraform output captured_name
+```
+
+If you only need the raw value for scripting, use:
+```bash
+terraform output -raw captured_name
+```
+
+---
+
+### **Summary**
+- Use resource attributes or module outputs to capture values.
+- Use dynamic names by interpolating captured values with `${}`.
+- Pass outputs to variables for modular or multi-stage configurations.
+- Use the `-raw` option if you only need the variable value directly for external usage. 
+
+Let me know if you need a more specific example!
