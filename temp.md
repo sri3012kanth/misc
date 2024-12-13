@@ -1,112 +1,187 @@
-In Terraform, you can capture the value of an output variable or resource attribute, then use it to configure additional resources dynamically. Here's how you can achieve that:
+Here’s how to enhance the email template with **Thymeleaf variables** to make it dynamic. This allows you to use Spring Boot's templating capabilities to populate the template with real data.
 
 ---
 
-### **1. Capturing an Output Variable Value**
-Define an **output** in your module or Terraform configuration to capture a specific value:
+### **Updated Thymeleaf Template with Variables**
 
-```hcl
-output "captured_name" {
-  value = google_cloud_run_service.example_service.name
-}
+Save this template as `email-template.html` in the `src/main/resources/templates` directory.
+
+```html
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9f9f9;
+        }
+        .email-container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: #ffffff;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .header {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .intro {
+            font-size: 16px;
+            color: #555;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        table th, table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        table th {
+            background-color: #f2f2f2;
+            color: #333;
+        }
+        .footer {
+            font-size: 14px;
+            color: #888;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Header -->
+        <div class="header" th:text="${emailSubject}">Your Report Summary</div>
+
+        <!-- Introductory Text -->
+        <div class="intro">
+            Dear <span th:text="${userName}">User</span>,<br><br>
+            Below is the summary of your recent activities and performance metrics. Please review the details in the tables below.
+        </div>
+
+        <!-- First Table -->
+        <table>
+            <thead>
+                <tr>
+                    <th>Activity</th>
+                    <th>Status</th>
+                    <th>Completion Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr th:each="activity : ${activities}">
+                    <td th:text="${activity.activity}">Project A</td>
+                    <td th:text="${activity.status}">Completed</td>
+                    <td th:text="${activity.date}">2024-12-10</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Second Table -->
+        <table>
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr th:each="metric : ${metrics}">
+                    <td th:text="${metric.metric}">Tasks Completed</td>
+                    <td th:text="${metric.value}">45</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Footer -->
+        <div class="footer">
+            Thank you,<br>
+            The Team
+        </div>
+    </div>
+</body>
+</html>
 ```
-
-When you apply your Terraform configuration, you can reference this output programmatically in subsequent configurations or resources.
 
 ---
 
-### **2. Using the Captured Output**
-You can use the captured value directly as an input for another resource. Here's an example:
+### **Java Code to Render the Template**
 
-#### Example: Capture a Cloud Run Service Name and Use It in a Pub/Sub Subscription
-```hcl
-resource "google_cloud_run_service" "example_service" {
-  name     = "my-cloud-run-service"
-  location = "us-central1"
+1. **Email Service**:
+   Use the following Spring Boot service to send emails:
 
-  template {
-    spec {
-      containers {
-        image = "gcr.io/my-project/my-image:latest"
-      }
-    }
-  }
-}
+   ```java
+   @Service
+   public class EmailService {
 
-resource "google_pubsub_topic" "example_topic" {
-  name = "example-topic"
-}
+       @Autowired
+       private JavaMailSender mailSender;
 
-# Create a subscription with the captured name as part of its ID
-resource "google_pubsub_subscription" "example_subscription" {
-  name  = "${google_cloud_run_service.example_service.name}-subscription"
-  topic = google_pubsub_topic.example_topic.name
-}
+       @Autowired
+       private SpringTemplateEngine templateEngine;
 
-output "captured_service_name" {
-  value = google_cloud_run_service.example_service.name
-}
-```
+       public void sendEmail(String recipient, String subject, Map<String, Object> model) {
+           MimeMessage mimeMessage = mailSender.createMimeMessage();
 
----
+           try {
+               MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true);
+               helper.setTo(recipient);
+               helper.setSubject(subject);
 
-### **3. Using Variables for Dynamic Configuration**
-If you're working with multiple configurations, you can combine the output into a variable to dynamically configure resources:
+               // Generate email content from the Thymeleaf template
+               Context context = new Context();
+               context.setVariables(model);
+               String htmlContent = templateEngine.process("email-template", context);
 
-```hcl
-variable "cloud_run_service_name" {
-  description = "Name of the Cloud Run service"
-  type        = string
-}
+               helper.setText(htmlContent, true);
+               mailSender.send(mimeMessage);
+           } catch (MessagingException e) {
+               e.printStackTrace();
+           }
+       }
+   }
+   ```
 
-resource "google_cloud_run_service_iam_member" "invoker" {
-  service  = var.cloud_run_service_name
-  location = "us-central1"
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:my-service-account@my-project.iam.gserviceaccount.com"
-}
-```
+2. **Populate Variables in the Model**:
+   Prepare the model and call the `sendEmail` method:
 
-To pass the captured value:
-```hcl
-module "dynamic_resources" {
-  source = "./modules/resource_module"
+   ```java
+   Map<String, Object> model = new HashMap<>();
+   model.put("emailSubject", "Your Report Summary");
+   model.put("userName", "John Doe");
+   model.put("activities", List.of(
+       Map.of("activity", "Project A", "status", "Completed", "date", "2024-12-10"),
+       Map.of("activity", "Project B", "status", "In Progress", "date", "N/A")
+   ));
+   model.put("metrics", List.of(
+       Map.of("metric", "Tasks Completed", "value", "45"),
+       Map.of("metric", "Pending Tasks", "value", "12")
+   ));
 
-  cloud_run_service_name = google_cloud_run_service.example_service.name
-}
-```
+   emailService.sendEmail("user@example.com", "Your Report Summary", model);
+   ```
 
 ---
 
-### **4. Dynamically Configure Additional Resources**
-If you want to append or modify a value for new resources:
-```hcl
-# Example appending a suffix to the captured name
-resource "google_storage_bucket" "example_bucket" {
-  name     = "${google_cloud_run_service.example_service.name}-bucket"
-  location = "US"
-}
-```
+### **Result**
+When the email is rendered and sent:
+- The `emailSubject`, `userName`, `activities`, and `metrics` will be dynamically replaced with their corresponding values.
+- The tables will display the data provided in the `activities` and `metrics` lists.
 
 ---
 
-### **5. Viewing the Captured Output**
-To view an output value after `terraform apply`, run:
-```bash
-terraform output captured_name
-```
-
-If you only need the raw value for scripting, use:
-```bash
-terraform output -raw captured_name
-```
-
----
-
-### **Summary**
-- Use resource attributes or module outputs to capture values.
-- Use dynamic names by interpolating captured values with `${}`.
-- Pass outputs to variables for modular or multi-stage configurations.
-- Use the `-raw` option if you only need the variable value directly for external usage. 
-
-Let me know if you need a more specific example!
+### **Customization Options**
+- You can add more variables or fields in the template.
+- Use conditional expressions in Thymeleaf (e.g., `th:if`, `th:unless`) to display optional content dynamically.
+- Add inline styles or external CSS for more design customizations.
