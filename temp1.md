@@ -1,12 +1,62 @@
-Here’s a complete example of a **change stream listener** in Kotlin Spring Boot using **customer profile documents** from a MongoDB collection and leveraging **ShedLock** with explicit **lock extension (heartbeat mechanism)**. This implementation ensures:
+Here’s a fully updated version of the change stream listener application with the following features:
 
-1. **Customer Profile Document** is used in the change stream.
-2. **Lock Extension Logic**: Heartbeat explicitly extends the lock duration during processing.
-3. Ensures failover with a lock timeout (`lockAtMostFor`) in case of failure.
+1. **Configuration-Driven Durations**:
+   - All time durations like `lockAtMostFor`, `lockAtLeastFor`, and `heartbeatInterval` are read from `application.yaml`.
+
+2. **Modular Structure**:
+   - Separate classes for configuration, change stream listener, heartbeat mechanism, and MongoDB handling.
+
+3. **Improved Resilience**:
+   - Handles both idle and failover scenarios effectively.
 
 ---
 
-### **Customer Profile Document**
+### **Application Configuration (`application.yaml`)**
+
+```yaml
+app:
+  mongo:
+    database: customer-db
+    collection: customer-profile
+  lock:
+    lockAtMostFor: PT5M         # Lock maximum duration: 5 minutes
+    lockAtLeastFor: PT10S       # Lock minimum duration: 10 seconds
+    heartbeatInterval: PT10S    # Heartbeat interval: 10 seconds
+```
+
+---
+
+### **Code Implementation**
+
+#### **Application Configuration**
+
+```kotlin
+import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.context.annotation.Configuration
+import java.time.Duration
+
+@Configuration
+@ConfigurationProperties(prefix = "app")
+class AppConfig {
+    lateinit var mongo: MongoConfig
+    lateinit var lock: LockConfig
+}
+
+class MongoConfig {
+    lateinit var database: String
+    lateinit var collection: String
+}
+
+class LockConfig {
+    lateinit var lockAtMostFor: Duration
+    lateinit var lockAtLeastFor: Duration
+    lateinit var heartbeatInterval: Duration
+}
+```
+
+---
+
+#### **Customer Profile Model**
 
 ```kotlin
 data class CustomerProfile(
@@ -22,69 +72,61 @@ data class CustomerProfile(
 
 ---
 
-### **Updated Change Stream Listener Implementation**
+#### **Change Stream Listener**
 
 ```kotlin
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
-import net.javacrumbs.shedlock.core.LockProvider
-import net.javacrumbs.shedlock.core.SimpleLock
-import org.springframework.scheduling.annotation.Scheduled
-import org.springframework.stereotype.Service
 import com.mongodb.client.MongoClient
 import com.mongodb.client.MongoCollection
 import com.mongodb.client.model.changestream.ChangeStreamDocument
+import net.javacrumbs.shedlock.core.LockProvider
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
 import org.bson.Document
-import java.time.Instant
-import kotlin.concurrent.thread
+import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.stereotype.Service
 
 @Service
-class CustomerChangeStreamListener(
+class ChangeStreamListener(
     private val mongoClient: MongoClient,
+    private val appConfig: AppConfig,
+    private val heartbeatManager: HeartbeatManager,
     private val lockProvider: LockProvider
 ) {
-    private val heartbeatInterval = 10000L // 10 seconds in milliseconds
-    private var heartbeatThread: Thread? = null
-    private var lock: SimpleLock? = null
-
-    /**
-     * Change stream listener with ShedLock.
-     * Scheduled every 5 seconds. Only one instance will execute due to ShedLock.
-     */
-    @Scheduled(fixedRate = 5000)
-    @SchedulerLock(name = "CustomerChangeStreamListenerTask", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
+    @Scheduled(fixedRate = 5000) // Check every 5 seconds
+    @SchedulerLock(
+        name = "CustomerChangeStreamListenerTask",
+        lockAtMostFor = "#{@appConfig.lock.lockAtMostFor}",
+        lockAtLeastFor = "#{@appConfig.lock.lockAtLeastFor}"
+    )
     fun listenToCustomerChanges() {
-        println("Acquired lock. Starting customer profile change stream listener.")
+        println("Acquired lock. Starting change stream listener.")
 
-        // Start a new heartbeat thread to extend the lock
-        startHeartbeat()
+        // Start the heartbeat
+        heartbeatManager.start()
 
         try {
-            val collection: MongoCollection<Document> = mongoClient
-                .getDatabase("<database-name>")
-                .getCollection("<collection-name>")
-
-            // Open the change stream
+            val collection = getCustomerProfileCollection()
             val changeStream = collection.watch().iterator()
 
-            // Process changes
             while (changeStream.hasNext()) {
                 val change: ChangeStreamDocument<Document> = changeStream.next()
                 val customerProfile = parseCustomerProfile(change.fullDocument)
                 println("Processing customer change: $customerProfile")
-                // Process change (e.g., send downstream, update other systems)
                 processCustomerChange(customerProfile)
             }
         } catch (ex: Exception) {
             println("Error in change stream listener: ${ex.message}")
         } finally {
-            stopHeartbeat()
-            println("Released lock. Stopping customer profile change stream listener.")
+            heartbeatManager.stop()
+            println("Released lock. Stopping change stream listener.")
         }
     }
 
-    /**
-     * Parse the MongoDB document into a CustomerProfile object.
-     */
+    private fun getCustomerProfileCollection(): MongoCollection<Document> {
+        return mongoClient
+            .getDatabase(appConfig.mongo.database)
+            .getCollection(appConfig.mongo.collection)
+    }
+
     private fun parseCustomerProfile(document: Document?): CustomerProfile {
         if (document == null) {
             throw IllegalArgumentException("Change document cannot be null")
@@ -100,22 +142,37 @@ class CustomerChangeStreamListener(
         )
     }
 
-    /**
-     * Process a customer profile change.
-     */
     private fun processCustomerChange(customerProfile: CustomerProfile) {
         println("Customer change detected: $customerProfile")
-        // Add business logic here (e.g., update downstream systems)
+        // Add business logic here
     }
+}
+```
 
-    /**
-     * Starts the heartbeat thread to extend the lock.
-     */
-    private fun startHeartbeat() {
+---
+
+#### **Heartbeat Manager**
+
+```kotlin
+import net.javacrumbs.shedlock.core.LockProvider
+import net.javacrumbs.shedlock.core.SimpleLock
+import org.springframework.stereotype.Component
+import java.time.Instant
+import kotlin.concurrent.thread
+
+@Component
+class HeartbeatManager(
+    private val lockProvider: LockProvider,
+    private val appConfig: AppConfig
+) {
+    private var heartbeatThread: Thread? = null
+    private var lock: SimpleLock? = null
+
+    fun start() {
         heartbeatThread = thread(start = true) {
             while (!Thread.currentThread().isInterrupted) {
                 try {
-                    Thread.sleep(heartbeatInterval)
+                    Thread.sleep(appConfig.lock.heartbeatInterval.toMillis())
                     extendLock()
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
@@ -127,21 +184,18 @@ class CustomerChangeStreamListener(
         }
     }
 
-    /**
-     * Stops the heartbeat thread.
-     */
-    private fun stopHeartbeat() {
+    fun stop() {
         heartbeatThread?.interrupt()
         heartbeatThread = null
         lock?.unlock()
         lock = null
     }
 
-    /**
-     * Explicitly extend the lock during processing.
-     */
     private fun extendLock() {
-        val newLock = lockProvider.lock("CustomerChangeStreamListenerTask", Instant.now().plusMillis(heartbeatInterval))
+        val newLock = lockProvider.lock(
+            "CustomerChangeStreamListenerTask",
+            Instant.now().plusMillis(appConfig.lock.heartbeatInterval.toMillis())
+        )
         if (newLock != null) {
             lock?.unlock()
             lock = newLock
@@ -155,36 +209,54 @@ class CustomerChangeStreamListener(
 
 ---
 
-### **Key Enhancements**
-1. **Heartbeat-Driven Lock Extension**:
-   - The `extendLock` method explicitly re-acquires the lock before it expires to prevent lock release during processing.
-   - `lockProvider.lock` extends the lock by adding `heartbeatInterval` to the current timestamp.
+### **Spring Boot Main Class**
 
-2. **Customer Profile Parsing**:
-   - Processes MongoDB documents into `CustomerProfile` objects for easy downstream handling.
+```kotlin
+import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.runApplication
+import org.springframework.scheduling.annotation.EnableScheduling
 
-3. **Failover Handling**:
-   - If the lock expires (`lockAtMostFor`), another instance will acquire the lock automatically.
+@SpringBootApplication
+@EnableScheduling
+class ChangeStreamApp
 
-4. **Graceful Shutdown**:
-   - Ensures the heartbeat thread is stopped and the lock is released when the listener terminates.
-
----
-
-### **Testing**
-
-1. **Multi-Instance Test**:
-   - Deploy two instances of the application.
-   - Confirm only one instance processes change streams at any time.
-
-2. **Failure Test**:
-   - Simulate failure of the active instance (kill the process).
-   - Verify that the lock is released, and the other instance starts processing after acquiring the lock.
-
-3. **Idle Test**:
-   - Let the system run without changes to ensure the lock is held correctly and extended via heartbeat.
+fun main(args: Array<String>) {
+    runApplication<ChangeStreamApp>(*args)
+}
+```
 
 ---
 
-### **Deployment in Kubernetes**
-Would you like assistance with creating Kubernetes manifests (e.g., `Deployment`, `Service`, `ConfigMap`, etc.) for deploying this application?
+### **Dependencies (`build.gradle.kts`)**
+
+```kotlin
+dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-data-mongodb")
+    implementation("org.springframework.boot:spring-boot-starter-scheduling")
+    implementation("net.javacrumbs.shedlock:shedlock-spring:5.5.0")
+    implementation("net.javacrumbs.shedlock:shedlock-provider-mongo:5.5.0")
+}
+```
+
+---
+
+### **Summary of Features**
+
+1. **Configuration Flexibility**: 
+   - Timeouts (`lockAtMostFor`, `lockAtLeastFor`, `heartbeatInterval`) are read from `application.yaml`.
+
+2. **Heartbeat Mechanism**:
+   - Ensures the lock is extended periodically.
+   - Gracefully handles interruptions or failures.
+
+3. **Failover Support**:
+   - `ShedLock` ensures that only one instance processes the change stream.
+   - If an instance fails, another automatically picks up.
+
+4. **MongoDB-Driven Change Streams**:
+   - Parses `CustomerProfile` changes and allows business logic integration.
+
+5. **Resilience and Scalability**:
+   - Modular design makes it easy to test and extend.
+
+Let me know if you'd like assistance with Kubernetes deployment for this application!
