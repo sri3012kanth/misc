@@ -1,135 +1,190 @@
-If your **Cloud Run service** was created with "Requires authentication," it means the service is private, and you need to authenticate requests using a valid **identity token**. Below is how to handle this setup:
+Here’s a complete example of a **change stream listener** in Kotlin Spring Boot using **customer profile documents** from a MongoDB collection and leveraging **ShedLock** with explicit **lock extension (heartbeat mechanism)**. This implementation ensures:
+
+1. **Customer Profile Document** is used in the change stream.
+2. **Lock Extension Logic**: Heartbeat explicitly extends the lock duration during processing.
+3. Ensures failover with a lock timeout (`lockAtMostFor`) in case of failure.
 
 ---
 
-## **1. Confirm Authentication Requirement**
+### **Customer Profile Document**
 
-Run the following command to check if the service requires authentication:
-
-```bash
-gcloud run services describe my-cloud-run-service \
-    --region=REGION \
-    --format="value(spec.template.spec.containers[0].image)"
-```
-
-You should see `authentication: Required`.
-
----
-
-## **2. Grant IAM Role to Call Cloud Run**
-
-### **Step 1: Find the GKE Node Service Account**
-GKE uses a **node service account** to make requests to other services. Find this account:
-
-```bash
-gcloud container clusters describe my-gke-cluster \
-    --region=REGION \
-    --format="value(nodeConfig.serviceAccount)"
-```
-
-The result will look like:  
-`<GCP_PROJECT_NUMBER>-compute@developer.gserviceaccount.com`
-
----
-
-### **Step 2: Grant `roles/run.invoker` Permission**
-Grant the GKE node service account the `roles/run.invoker` role to allow it to call the Cloud Run service:
-
-```bash
-gcloud run services add-iam-policy-binding my-cloud-run-service \
-    --region=REGION \
-    --member="serviceAccount:<GKE_NODE_SERVICE_ACCOUNT>" \
-    --role="roles/run.invoker"
+```kotlin
+data class CustomerProfile(
+    val id: String,
+    val name: String,
+    val address: String,
+    val phone: String,
+    val email: String,
+    val ssn: String,
+    val dateOfBirth: String
+)
 ```
 
 ---
 
-## **3. Update GKE Deployment to Authenticate Requests**
+### **Updated Change Stream Listener Implementation**
 
-To authenticate requests from your GKE pod to the Cloud Run service:
+```kotlin
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
+import net.javacrumbs.shedlock.core.LockProvider
+import net.javacrumbs.shedlock.core.SimpleLock
+import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.stereotype.Service
+import com.mongodb.client.MongoClient
+import com.mongodb.client.MongoCollection
+import com.mongodb.client.model.changestream.ChangeStreamDocument
+import org.bson.Document
+import java.time.Instant
+import kotlin.concurrent.thread
 
-### **Step 1: Use a GCP Service Account in the GKE Pod**
-You need to use **Workload Identity** to link a Kubernetes service account to the GCP service account.
+@Service
+class CustomerChangeStreamListener(
+    private val mongoClient: MongoClient,
+    private val lockProvider: LockProvider
+) {
+    private val heartbeatInterval = 10000L // 10 seconds in milliseconds
+    private var heartbeatThread: Thread? = null
+    private var lock: SimpleLock? = null
 
-#### **a) Create a Kubernetes Service Account:**
-```bash
-kubectl create serviceaccount cloud-run-access
-```
+    /**
+     * Change stream listener with ShedLock.
+     * Scheduled every 5 seconds. Only one instance will execute due to ShedLock.
+     */
+    @Scheduled(fixedRate = 5000)
+    @SchedulerLock(name = "CustomerChangeStreamListenerTask", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
+    fun listenToCustomerChanges() {
+        println("Acquired lock. Starting customer profile change stream listener.")
 
-#### **b) Bind the GCP Service Account to the Kubernetes Service Account:**
-```bash
-gcloud iam service-accounts add-iam-policy-binding <GKE_NODE_SERVICE_ACCOUNT> \
-    --role=roles/iam.workloadIdentityUser \
-    --member="serviceAccount:PROJECT_ID.svc.id.goog[default/cloud-run-access]"
-```
+        // Start a new heartbeat thread to extend the lock
+        startHeartbeat()
 
-#### **c) Annotate the Kubernetes Service Account:**
-```bash
-kubectl annotate serviceaccount cloud-run-access \
-    iam.gke.io/gcp-service-account=<GKE_NODE_SERVICE_ACCOUNT>
+        try {
+            val collection: MongoCollection<Document> = mongoClient
+                .getDatabase("<database-name>")
+                .getCollection("<collection-name>")
+
+            // Open the change stream
+            val changeStream = collection.watch().iterator()
+
+            // Process changes
+            while (changeStream.hasNext()) {
+                val change: ChangeStreamDocument<Document> = changeStream.next()
+                val customerProfile = parseCustomerProfile(change.fullDocument)
+                println("Processing customer change: $customerProfile")
+                // Process change (e.g., send downstream, update other systems)
+                processCustomerChange(customerProfile)
+            }
+        } catch (ex: Exception) {
+            println("Error in change stream listener: ${ex.message}")
+        } finally {
+            stopHeartbeat()
+            println("Released lock. Stopping customer profile change stream listener.")
+        }
+    }
+
+    /**
+     * Parse the MongoDB document into a CustomerProfile object.
+     */
+    private fun parseCustomerProfile(document: Document?): CustomerProfile {
+        if (document == null) {
+            throw IllegalArgumentException("Change document cannot be null")
+        }
+        return CustomerProfile(
+            id = document.getString("id"),
+            name = document.getString("name"),
+            address = document.getString("address"),
+            phone = document.getString("phone"),
+            email = document.getString("email"),
+            ssn = document.getString("ssn"),
+            dateOfBirth = document.getString("dateOfBirth")
+        )
+    }
+
+    /**
+     * Process a customer profile change.
+     */
+    private fun processCustomerChange(customerProfile: CustomerProfile) {
+        println("Customer change detected: $customerProfile")
+        // Add business logic here (e.g., update downstream systems)
+    }
+
+    /**
+     * Starts the heartbeat thread to extend the lock.
+     */
+    private fun startHeartbeat() {
+        heartbeatThread = thread(start = true) {
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    Thread.sleep(heartbeatInterval)
+                    extendLock()
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    println("Heartbeat thread interrupted.")
+                } catch (e: Exception) {
+                    println("Error during heartbeat: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Stops the heartbeat thread.
+     */
+    private fun stopHeartbeat() {
+        heartbeatThread?.interrupt()
+        heartbeatThread = null
+        lock?.unlock()
+        lock = null
+    }
+
+    /**
+     * Explicitly extend the lock during processing.
+     */
+    private fun extendLock() {
+        val newLock = lockProvider.lock("CustomerChangeStreamListenerTask", Instant.now().plusMillis(heartbeatInterval))
+        if (newLock != null) {
+            lock?.unlock()
+            lock = newLock
+            println("Lock extended successfully.")
+        } else {
+            println("Failed to extend lock.")
+        }
+    }
+}
 ```
 
 ---
 
-### **Step 2: Update the Deployment YAML**
+### **Key Enhancements**
+1. **Heartbeat-Driven Lock Extension**:
+   - The `extendLock` method explicitly re-acquires the lock before it expires to prevent lock release during processing.
+   - `lockProvider.lock` extends the lock by adding `heartbeatInterval` to the current timestamp.
 
-Update the GKE deployment to use the `cloud-run-access` service account and generate an identity token:
+2. **Customer Profile Parsing**:
+   - Processes MongoDB documents into `CustomerProfile` objects for easy downstream handling.
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: cloud-run-client
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: cloud-run-client
-  template:
-    metadata:
-      labels:
-        app: cloud-run-client
-    spec:
-      serviceAccountName: cloud-run-access
-      containers:
-      - name: curl-container
-        image: curlimages/curl:latest
-        command: ["/bin/sh", "-c", "sleep 3600"]
-        env:
-        - name: CLOUD_RUN_URL
-          value: "https://my-cloud-run-service-<ID>.a.run.internal"
-```
+3. **Failover Handling**:
+   - If the lock expires (`lockAtMostFor`), another instance will acquire the lock automatically.
+
+4. **Graceful Shutdown**:
+   - Ensures the heartbeat thread is stopped and the lock is released when the listener terminates.
 
 ---
 
-## **4. Test the Setup**
+### **Testing**
 
-### **Step 1: Open a Shell in the GKE Pod**
-```bash
-kubectl exec -it $(kubectl get pods -l app=cloud-run-client -o jsonpath='{.items[0].metadata.name}') -- /bin/sh
-```
+1. **Multi-Instance Test**:
+   - Deploy two instances of the application.
+   - Confirm only one instance processes change streams at any time.
 
-### **Step 2: Call the Cloud Run Service**
-Fetch the identity token and call the service:
+2. **Failure Test**:
+   - Simulate failure of the active instance (kill the process).
+   - Verify that the lock is released, and the other instance starts processing after acquiring the lock.
 
-```bash
-TOKEN=$(curl -H "Metadata-Flavor: Google" \
-  http://metadata/computeMetadata/v1/instance/service-accounts/default/identity?audience=https://my-cloud-run-service-<ID>.a.run.internal)
-
-curl -H "Authorization: Bearer $TOKEN" $CLOUD_RUN_URL
-```
-
-You should receive a response from your private Cloud Run service.
+3. **Idle Test**:
+   - Let the system run without changes to ensure the lock is held correctly and extended via heartbeat.
 
 ---
 
-## **5. Troubleshooting**
-
-- **403 Forbidden Error:**
-  Ensure the GKE node service account has `roles/run.invoker` permission.
-- **DNS Resolution Issues:**
-  Check that the private DNS zone for `a.run.internal` is set up correctly.
-- **Timeout Issues:**
-  Verify network connectivity between the GKE cluster and the Cloud Run service.
-
-Let me know if you need further assistance!
+### **Deployment in Kubernetes**
+Would you like assistance with creating Kubernetes manifests (e.g., `Deployment`, `Service`, `ConfigMap`, etc.) for deploying this application?
