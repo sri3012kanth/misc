@@ -1,131 +1,130 @@
-### Notes on Change Stream Listener with Lock Renewal and Failover Mechanism
+To dynamically drive the transformation through a template-based response in JSON, you can use **WireMock’s Handlebars templating engine**. Handlebars templates allow you to manipulate request data, such as headers, directly in the response.
 
-**Objective**: Implement a change stream listener where two instances compete for a distributed lock. The instance with the lock actively listens for events using the `next()` method on a cursor. The lock is continuously renewed during waiting, ensuring failover to another instance if the first one dies or encounters an exception.
-
----
-
-#### 1. **Components Overview**
-- **Change Stream Listener**: Actively listens to events using the `next()` method.
-- **Scheduler**: Periodically renews the lock for the active instance.
-- **Distributed Lock**: Ensures only one instance listens to the change stream at a time.
+Here’s how to achieve this with a template-driven approach:
 
 ---
 
-#### 2. **Execution Flow**
-1. **Initial Lock Acquisition**:
-   - Each instance attempts to acquire a distributed lock at startup or upon a scheduler trigger.
-   - The instance that successfully acquires the lock begins listening to the change stream.
+### **Steps to Access Base64 Encoded Header Value in the Response**
 
-2. **Listening for Events**:
-   - The instance with the lock listens for events using the `cursor.next()` method in a loop.
-   - While waiting, the lock is continuously renewed through periodic scheduler triggers.
+1. **Enable Global Response Templating**:
+   - Configure WireMock to enable response templating.
 
-3. **Lock Renewal**:
-   - The active instance renews the lock periodically.
-   - Lock renewal ensures continuity of processing and prevents failover during normal operation.
+2. **Define a Mapping with Handlebars**:
+   - Use Handlebars helpers to manipulate the header data in the mapping file.
 
-4. **Failover**:
-   - **Failure Scenarios**:
-     - The instance holding the lock dies unexpectedly (lock expires).
-     - An exception occurs in the change stream processing (lock is explicitly released).
-   - When the lock expires or is released, other instances compete to acquire the lock.
-   - The instance that acquires the lock resumes listening for events.
+3. **Customize the Header Logic**:
+   - Decode the base64 header, split it by a colon (`:`), and extract the desired part.
 
 ---
 
-#### 3. **Implementation Details**
-1. **Lock Management**:
-   - Use a distributed lock with TTL (time-to-live) to handle automatic expiration.
-   - Implement a lock renewal mechanism where the active instance refreshes the TTL periodically.
+### **Mapping File Example**
 
-2. **Change Stream Listening**:
-   - Wrap the `next()` method in a loop with proper exception handling.
-   - Ensure lock renewal occurs even while waiting on the cursor.
+Create a mapping file that uses Handlebars templates to decode the base64 header.
 
-3. **Failover Handling**:
-   - When a lock expires, any other instance can acquire it.
-   - Upon acquiring the lock, the new instance initializes the change stream listener.
-
-4. **Error Handling**:
-   - Log and handle exceptions from `cursor.next()` gracefully.
-   - Explicitly release the lock upon encountering fatal exceptions.
-
----
-
-#### 4. **Key Considerations**
-- **Lock Expiration Timing**:
-  - Set the TTL to a value slightly longer than the scheduler's renewal interval to avoid premature expiration.
-- **Failover Timing**:
-  - Ensure the lock acquisition process by other instances is seamless to minimize downtime.
-- **Graceful Shutdown**:
-  - Ensure the lock is explicitly released if the application shuts down normally.
+`mappings/base64-header-mapping.json`:
+```json
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/example"
+  },
+  "response": {
+    "status": 200,
+    "body": "{{#if (exists request.headers.X-Custom-Header)}}{{#with (base64Decode request.headers.X-Custom-Header.[0])}}{{split this ':' 1}}{{else}}Missing or invalid header{{/with}}{{else}}Missing header{{/if}}",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "transformers": ["response-template"]
+  }
+}
+```
 
 ---
 
-#### 5. **Tools & Technologies**
-- **Distributed Lock**: Redis, ZooKeeper, or database-based locking.
-- **Scheduler**: Spring Scheduler, Quartz Scheduler, or a custom timer task.
-- **Logging and Monitoring**: To detect lock expirations and failover events.
+### **Explanation of the Template**
+
+1. **Check Header Existence**:
+   - `{{exists request.headers.X-Custom-Header}}`: Ensures the header exists.
+
+2. **Decode the Base64 Header**:
+   - `{{base64Decode request.headers.X-Custom-Header.[0]}}`: Decodes the first value of the `X-Custom-Header`.
+
+3. **Split by Colon**:
+   - `{{split this ':' 1}}`: Splits the decoded string on `:` and retrieves the second part.
+
+4. **Handle Missing Values**:
+   - The `{{#if}}` and `{{else}}` blocks ensure appropriate fallback messages for missing or invalid headers.
 
 ---
 
-#### 6. **Sample Pseudocode**
-```kotlin
-fun startChangeStreamListener() {
-    while (true) {
-        if (acquireLock(lockId)) {
-            try {
-                val cursor = initializeChangeStreamCursor()
-                while (true) {
-                    try {
-                        val event = cursor.next() // Block until an event is received
-                        processEvent(event)
-                    } catch (e: Exception) {
-                        log.error("Error processing event: ${e.message}")
-                        releaseLock(lockId) // Explicit lock release
-                        throw e
-                    }
-                }
-            } finally {
-                releaseLock(lockId) // Ensure lock release on shutdown
-            }
-        } else {
-            log.info("Lock not acquired, waiting for the next attempt...")
-            Thread.sleep(5000) // Wait before retrying
-        }
+### **Enable Global Response Templating**
+
+To enable global response templating, you need to configure WireMock with the `--global-response-templating` flag.
+
+#### Command:
+```bash
+java -jar wiremock-standalone.jar --global-response-templating
+```
+
+---
+
+### **Test the Endpoint**
+
+#### Request:
+```http
+GET /example HTTP/1.1
+Host: localhost:8080
+X-Custom-Header: QWJjZGVmZzpoaWprbG1ub3A=
+```
+
+#### Response:
+```json
+{
+  "property": "hijklmnop"
+}
+```
+
+---
+
+### **Optional: Run WireMock in Spring Boot**
+
+If migrating to Spring Boot, you can leverage the same `response-template` transformer by enabling it programmatically.
+
+#### Spring Boot Configuration Example:
+
+```java
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.extension.responsetemplating.ResponseTemplateTransformer;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+
+@SpringBootApplication
+public class WireMockApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(WireMockApplication.class, args);
     }
-}
 
-fun acquireLock(lockId: String): Boolean {
-    // Try to acquire lock in a distributed system
-}
-
-fun releaseLock(lockId: String) {
-    // Explicitly release the lock
-}
-
-fun renewLock(lockId: String) {
-    // Periodically refresh the TTL of the lock
-}
-
-// Scheduler for lock renewal
-scheduler.scheduleAtFixedRate {
-    if (isLockHeld(lockId)) {
-        renewLock(lockId)
+    @Bean
+    public WireMockConfiguration wireMockConfig() {
+        return WireMockConfiguration.wireMockConfig()
+                .extensions(new ResponseTemplateTransformer(true));
     }
 }
 ```
 
 ---
 
-#### 7. **Failover Example**
-1. **Scenario**: Instance A is actively listening to the change stream and renewing the lock.
-   - **Failure**: Instance A dies (e.g., server crash), and its lock expires automatically.
-   - **Failover**: Instance B acquires the lock, initializes the cursor, and resumes processing.
+### **Key Advantages**
 
-2. **Scenario**: Instance A throws an exception while processing an event.
-   - **Recovery**: Instance A releases the lock explicitly, and Instance B acquires it to continue processing.
+1. **Dynamic Response Handling**:
+   - No need for custom Java code; logic is handled directly in the template.
 
----
+2. **Ease of Configuration**:
+   - Makes mappings more declarative and easier to maintain.
 
-This approach ensures continuous processing of change streams with high availability and failover capability, minimizing downtime and preventing duplicate processing.
+3. **Flexible Logic**:
+   - Handlebars helpers allow for complex transformations without extra programming.
+
+This approach lets you handle dynamic logic directly in the response JSON, making it ideal for templated and flexible testing scenarios.
