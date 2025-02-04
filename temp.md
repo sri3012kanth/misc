@@ -1,133 +1,167 @@
-To decode a Base64 string and map the value of a specific key from the decoded JSON in WireMock, you can use **Handlebars templating** in combination with the `base64Decode` helper and the `jsonPath` helper.
+To set up **Python logging** similar to **Spring Boot**, you can use Python’s built-in `logging` module and configure it for structured, customizable output. Here's how you can set it up:
 
-### **Steps**
+---
 
-1. **Decode the Base64 string**.
-2. **Parse the decoded string as JSON**.
-3. **Extract the value of a specific key from the JSON**.
+## **1. Basic Logging Setup**
+```python
+import logging
 
-In this solution, you will leverage WireMock's Handlebars helpers and `jsonPath` to achieve this transformation.
+# Basic configuration
+logging.basicConfig(
+    level=logging.INFO,  # Set logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",  # Log format
+    datefmt="%Y-%m-%d %H:%M:%S"  # Date format
+)
 
-### **Solution Using Handlebars Templating**
+# Example logger
+logger = logging.getLogger("myApp")  # Similar to package name in Spring Boot
 
-Here’s an example:
+def sample_function():
+    logger.debug("Debug message for tracing")
+    logger.info("Informational message")
+    logger.warning("Warning message")
+    logger.error("Error message")
+    logger.critical("Critical error message")
 
-### **1. Mapping File Example (`base64-header-mapping.json`)**
+if __name__ == "__main__":
+    sample_function()
+```
 
+**Sample Output:**
+```
+2025-02-04 15:30:01 - INFO - myApp - Informational message
+2025-02-04 15:30:01 - WARNING - myApp - Warning message
+2025-02-04 15:30:01 - ERROR - myApp - Error message
+2025-02-04 15:30:01 - CRITICAL - myApp - Critical error message
+```
+
+---
+
+## **2. Advanced Configuration with Logging Levels**
+Create a **logging configuration file** (e.g., `logging.conf`):
+
+```ini
+[loggers]
+keys=root,myApp
+
+[handlers]
+keys=consoleHandler,fileHandler
+
+[formatters]
+keys=simpleFormatter,detailedFormatter
+
+[logger_root]
+level=WARNING
+handlers=consoleHandler
+
+[logger_myApp]
+level=DEBUG
+handlers=consoleHandler,fileHandler
+qualname=myApp
+propagate=0
+
+[handler_consoleHandler]
+class=StreamHandler
+level=DEBUG
+formatter=detailedFormatter
+args=(sys.stdout,)
+
+[handler_fileHandler]
+class=FileHandler
+level=INFO
+formatter=detailedFormatter
+args=("app.log", "a")
+
+[formatter_simpleFormatter]
+format=%(levelname)s - %(message)s
+
+[formatter_detailedFormatter]
+format=%(asctime)s - %(levelname)s - %(name)s - %(message)s
+datefmt=%Y-%m-%d %H:%M:%S
+```
+
+### **Using the Configuration in Code**
+```python
+import logging
+import logging.config
+
+# Load configuration from file
+logging.config.fileConfig("logging.conf")
+
+# Get logger
+logger = logging.getLogger("myApp")
+
+def sample_function():
+    logger.debug("Debugging details")
+    logger.info("Application started")
+    logger.warning("Low disk space")
+    logger.error("Failed to connect to database")
+    logger.critical("Application crash")
+
+if __name__ == "__main__":
+    sample_function()
+```
+
+---
+
+## **3. Logging in Cloud Run**
+When running in **Google Cloud Run**, structured logging can be enabled for better integration with **Cloud Logging**:
+
+### **Structured Logging (JSON Format)**
+```python
+import logging
+import json
+import sys
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_entry = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "severity": record.levelname,
+            "message": record.getMessage(),
+            "name": record.name,
+            "module": record.module,
+            "funcName": record.funcName,
+        }
+        return json.dumps(log_entry)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("myApp")
+logger.handlers[0].setFormatter(JsonFormatter())
+
+# Sample log messages
+logger.info("Service started successfully")
+logger.error("Error processing request")
+```
+
+**Output in Cloud Logging:**
 ```json
 {
-  "request": {
-    "method": "GET",
-    "urlPath": "/example"
-  },
-  "response": {
-    "status": 200,
-    "body": "{{#if (exists request.headers.X-Custom-Header)}}{{#with (jsonPath (base64Decode request.headers.X-Custom-Header.[0]) '$.desiredKey')}}{{this}}{{else}}Key not found in decoded JSON{{/with}}{{else}}Missing header{{/if}}",
-    "headers": {
-      "Content-Type": "application/json"
-    },
-    "transformers": ["response-template"]
-  }
-}
-```
-
-### **Explanation**
-
-1. **Check Header Existence**:
-   - `{{exists request.headers.X-Custom-Header}}`: Verifies that the `X-Custom-Header` exists in the request.
-
-2. **Decode Base64**:
-   - `{{base64Decode request.headers.X-Custom-Header.[0]}}`: Decodes the Base64 string found in the `X-Custom-Header`.
-
-3. **Parse JSON**:
-   - `{{jsonPath (base64Decode ...) '$.desiredKey'}}`: Uses `jsonPath` to extract the value associated with the key `desiredKey` from the decoded JSON string.
-
-4. **Handle Missing Header or Key**:
-   - The template includes checks for both missing headers and missing keys in the decoded JSON.
-
-### **2. Example of the Base64 Encoded Header**
-
-Given that the header contains a Base64 encoded string, the value might look something like this:
-
-**Header Example**:
-```http
-X-Custom-Header: eyJkZXNpcmVkS2V5IjoiZXhhbXBsZVZhbHVlIn0=  # Base64 of {"desiredKey": "exampleValue"}
-```
-
-When decoded, the value is:
-```json
-{
-  "desiredKey": "exampleValue"
-}
-```
-
-### **3. Response Body**
-
-When you access `/example` with the request above, WireMock will decode the Base64 string, parse it as JSON, and return the value associated with `desiredKey`:
-
-#### Response Body:
-```json
-"exampleValue"
-```
-
-### **4. Additional Notes**
-
-- **Base64 Decode**: `{{base64Decode request.headers.X-Custom-Header.[0]}}` decodes the Base64 string.
-- **JSON Path**: `{{jsonPath (base64Decode ...) '$.desiredKey'}}` is used to extract the value associated with `desiredKey` from the decoded JSON.
-- **Error Handling**: If the header is missing, the response will include `"Missing header"`. If the key is not found in the decoded JSON, the response will include `"Key not found in decoded JSON"`.
-
-### **5. Enable Response Templating**
-
-Make sure that response templating is enabled in WireMock.
-
-#### Command-line Example:
-```bash
-java -jar wiremock-standalone.jar --global-response-templating
-```
-
-Alternatively, if you are using Spring Boot, ensure you have the response template transformer configured:
-
-#### Spring Boot Configuration:
-```java
-import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
-import com.github.tomakehurst.wiremock.extension.responsetemplating.ResponseTemplateTransformer;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.Bean;
-
-@SpringBootApplication
-public class WireMockApplication {
-
-    public static void main(String[] args) {
-        SpringApplication.run(WireMockApplication.class, args);
-    }
-
-    @Bean
-    public WireMockConfiguration wireMockConfig() {
-        return WireMockConfiguration.wireMockConfig()
-                .extensions(new ResponseTemplateTransformer(true));
-    }
+  "timestamp": "2025-02-04 15:30:01",
+  "severity": "INFO",
+  "message": "Service started successfully",
+  "name": "myApp",
+  "module": "main",
+  "funcName": "<module>"
 }
 ```
 
 ---
 
-### **6. Test the Implementation**
+## **4. Comparison with Spring Boot Logging**
+- **Spring Boot**: Uses Logback/SLF4J, supports different log levels and structured logging (JSON, XML).
+- **Python**: Uses `logging` module, configurable for various handlers (console, file, HTTP), supports JSON formatting.
 
-#### Request:
+## **Summary**
+- Configure Python logging to mimic Spring Boot with `logging` or `logging.config`.
+- Use **JSON formatting** for structured logging in **Cloud Run** or other cloud services.
+- Utilize **configuration files** for reusable, centralized logging settings.
 
-```http
-GET /example HTTP/1.1
-Host: localhost:8080
-X-Custom-Header: eyJkZXNpcmVkS2V5IjoiZXhhbXBsZVZhbHVlIn0=  # Base64 of {"desiredKey": "exampleValue"}
-```
-
-#### Response Body:
-
-```json
-"exampleValue"
-```
-
-### **Conclusion**
-
-By using **Handlebars** and **WireMock’s built-in helpers**, you can easily decode a Base64 string, parse it as JSON, and access specific keys in the decoded content directly within your WireMock mappings. This makes it easier to create dynamic responses based on incoming request data.
+Would you like examples for specific use cases or log message formats? 🚀
