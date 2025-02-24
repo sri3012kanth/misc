@@ -1,88 +1,145 @@
-To generate and configure **SSH RSA certificates** for your SFTP server running in the Docker container (using the `atmoz/sftp` image), follow these steps:
+To automate key generation within the Dockerfile, you can modify the Dockerfile to generate the SSH key pair (`id_rsa` and `id_rsa.pub`) within the container during the build process. Here's how you can automate key generation:
 
-### **Steps to Generate and Configure RSA SSH Keys for SFTP**
+### **Updated Dockerfile to Automate Key Generation**
 
-#### **1. Generate SSH RSA Key Pair (Private and Public Keys)**
+```Dockerfile
+# Use the atmoz/sftp base image
+FROM atmoz/sftp:latest
 
-You can generate an RSA key pair (private and public keys) using `ssh-keygen`. Here's how:
+# Set the user and the working directory
+USER root
+WORKDIR /home/user
 
-1. **Generate RSA Key Pair**:
-   On your local machine, use the following command to generate an RSA key pair with a 2048-bit key length (you can adjust the bit length as needed):
+# Generate RSA SSH key pair inside the container
+RUN ssh-keygen -t rsa -b 2048 -f /home/user/.ssh/id_rsa -N "" && \
+    chmod 600 /home/user/.ssh/id_rsa && \
+    chmod 644 /home/user/.ssh/id_rsa.pub && \
+    chown -R user:user /home/user/.ssh
 
-   ```sh
-   ssh-keygen -t rsa -b 2048 -f ~/.ssh/sftp_rsa_key
-   ```
+# Copy the generated public key to authorized_keys
+RUN cp /home/user/.ssh/id_rsa.pub /home/user/.ssh/authorized_keys
 
-   This will generate two files:
-   - `~/.ssh/sftp_rsa_key`: Private key (keep it secure).
-   - `~/.ssh/sftp_rsa_key.pub`: Public key (you will copy this to the Docker container).
+# Set permissions for authorized_keys
+RUN chmod 600 /home/user/.ssh/authorized_keys && \
+    chown user:user /home/user/.ssh/authorized_keys
 
-2. **Set Proper Permissions for the Private Key** (Local machine):
-   Make sure the private key file has the correct permissions:
+# Expose the SFTP port (default is 22)
+EXPOSE 22
 
-   ```sh
-   chmod 600 ~/.ssh/sftp_rsa_key
-   ```
+# Set the entrypoint to start the SSH daemon
+CMD ["/usr/sbin/sshd", "-D"]
+```
 
-#### **2. Copy the Public Key to the Docker Container**
+### **Explanation of the Dockerfile:**
 
-1. **Copy the Public Key** into the container’s `/home/user/.ssh/authorized_keys`:
+1. **Generate SSH keys**:  
+   - `RUN ssh-keygen -t rsa -b 2048 -f /home/user/.ssh/id_rsa -N ""` will generate a 2048-bit RSA key pair with no passphrase (`-N ""`).
+   - `chmod 600 /home/user/.ssh/id_rsa` ensures the private key is secure.
+   - `chmod 644 /home/user/.ssh/id_rsa.pub` allows the public key to be readable.
+   - `chown -R user:user /home/user/.ssh` changes the ownership to the correct user.
 
-   First, copy the public key (`sftp_rsa_key.pub`) from your local machine to the Docker container. You can do this by using the `docker cp` command:
+2. **Copy public key to `authorized_keys`**:  
+   - The public key is copied into the `authorized_keys` file to allow SSH key authentication.
 
-   ```sh
-   docker cp ~/.ssh/sftp_rsa_key.pub <container_name_or_id>:/home/user/.ssh/authorized_keys
-   ```
+3. **Set the permissions for `authorized_keys`**:  
+   - The `authorized_keys` file permissions are set to `600`, ensuring the correct access controls.
 
-   Make sure the `.ssh` directory exists and has the correct permissions:
+4. **Expose Port**:  
+   - The SSH port (default 22) is exposed to allow connections.
 
-   ```sh
-   docker exec -it <container_name_or_id> sh
-   chmod 700 /home/user/.ssh
-   chmod 600 /home/user/.ssh/authorized_keys
-   ```
-
-#### **3. Configure `sshd_config` for RSA Key Authentication**
-
-Next, make sure the `sshd_config` file is set to allow RSA authentication.
-
-1. **Update the `sshd_config`**:
-   Ensure that the `sshd_config` file inside the container supports `ssh-rsa` key authentication. Here’s how you can modify or append the relevant settings in the `sshd_config`:
-
-   - **Ensure RSA keys are enabled:**
-
-     ```bash
-     # Ensure ssh-rsa is supported
-     PubkeyAcceptedAlgorithms ssh-rsa
-     AuthorizedKeysFile .ssh/authorized_keys
-     ```
-
-2. **Restart SSH Service**:
-   After making changes to the `sshd_config` file, restart the SSH service inside the container to apply the changes. If you are using the default `atmoz/sftp` image, it might not expose a direct `ssh` service to restart, but you can restart the container:
-
-   ```sh
-   docker restart <container_name_or_id>
-   ```
-
-#### **4. Connect Using the Private Key**
-
-Finally, you can use the private key to authenticate with the SFTP server.
-
-1. **Use SFTP to Connect**:
-
-   ```sh
-   sftp -i ~/.ssh/sftp_rsa_key -P 2222 user@localhost
-   ```
-
-   Replace `localhost` with the container's actual hostname or IP if necessary, and ensure that the private key (`sftp_rsa_key`) has the correct permissions.
+5. **Start the SSH server**:  
+   - The `CMD` line starts the SSH daemon in the foreground, allowing the container to run indefinitely.
 
 ---
 
-### **Summary:**
-1. **Generate an RSA Key Pair** using `ssh-keygen` on your local machine.
-2. **Copy the Public Key** (`sftp_rsa_key.pub`) to the Docker container and place it in `/home/user/.ssh/authorized_keys`.
-3. **Configure `sshd_config`** to support `ssh-rsa` by ensuring the relevant `PubkeyAcceptedAlgorithms` and `AuthorizedKeysFile` settings are correct.
-4. **Restart the SSH service** by restarting the container.
-5. **Connect using the private key** with the `-i` option in the `sftp` command.
+### **Docker Compose File**
 
-After following these steps, you should be able to authenticate using the generated RSA key pair and securely transfer files via SFTP.
+Here’s the updated **`docker-compose.yml`** for your service:
+
+```yaml
+version: '3.8'
+
+services:
+  sftp:
+    build: .
+    container_name: sftp-server
+    ports:
+      - "2222:22" # Map SFTP port to host port 2222
+    volumes:
+      - ./data:/home/user/upload # Mount a local directory to the container for file uploads
+    environment:
+      SFTP_USERS: "user:password:1001" # Define user, password, and UID
+    restart: always
+```
+
+### **Steps to Build and Run the SFTP Server**
+
+1. **Build the Docker image**:  
+   Run this command in the directory containing the `Dockerfile` and `docker-compose.yml`:
+
+   ```sh
+   docker-compose build
+   ```
+
+2. **Start the container**:  
+   Use `docker-compose up` to start the container in the background:
+
+   ```sh
+   docker-compose up -d
+   ```
+
+   The SFTP server will now be running on port 2222, and the RSA key pair will have been automatically generated.
+
+### **Test the SFTP Server**
+
+Once the server is up and running, you can test the SFTP connection using the private key:
+
+```sh
+sftp -i ~/.ssh/sftp_rsa_key -P 2222 user@localhost
+```
+
+Alternatively, if you want to connect using **JSCH** Java client:
+
+```java
+import com.jcraft.jsch.*;
+
+public class SFTPClient {
+    public static void main(String[] args) {
+        String username = "user";
+        String host = "localhost";
+        int port = 2222;
+        String privateKey = "/path/to/sftp_rsa_key"; // Path to the private key
+
+        try {
+            JSch jsch = new JSch();
+            jsch.addIdentity(privateKey);
+
+            Session session = jsch.getSession(username, host, port);
+            session.setConfig("StrictHostKeyChecking", "no"); // Disable strict host key checking
+            session.connect();
+
+            Channel channel = session.openChannel("sftp");
+            channel.connect();
+
+            ChannelSftp sftpChannel = (ChannelSftp) channel;
+
+            // Now you can use sftpChannel to interact with the SFTP server
+            // Example: Upload a file
+            sftpChannel.put("localFile.txt", "/home/user/upload/remoteFile.txt");
+
+            // Disconnect
+            sftpChannel.exit();
+            session.disconnect();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### **Conclusion:**
+
+With this setup, the SSH RSA key pair will be generated inside the Docker container, and you won’t need to manually generate or copy the keys. You can use the keys with the JSCH client or any SFTP client that supports RSA authentication.
+
+Let me know if you encounter any issues or need further adjustments!
