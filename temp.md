@@ -1,64 +1,67 @@
-To configure the SFTP server with certificate-based authentication using a locally generated certificate (instead of SSH key pairs), follow these steps:
+To configure **Public Key Authentication** and set the `AuthorizedKeysFile` correctly inside a Docker container running an SFTP server, follow these steps:
 
 ---
 
-## **1️⃣ Generate an SSL Certificate for SFTP**
-We will generate a self-signed certificate and use it for authentication.
+## **1️⃣ Modify SSH Configuration in the Docker Container**
+Since OpenSSH inside the container controls authentication, we need to explicitly enable **public key authentication**.
 
-### **Generate a Key Pair & Certificate**
-Run the following command in your terminal to generate a private key and public certificate:
-```sh
-openssl req -x509 -newkey rsa:4096 -keyout sftp_server.key -out sftp_server.crt -days 365 -nodes
+### **Create a Custom `sshd_config` File**
+Inside your project directory, create `sshd_config` with the following content:
+
+📌 **`sshd_config`**
+```plaintext
+# Enable public key authentication
+PubkeyAuthentication yes
+
+# Set the file where SSH looks for authorized keys
+AuthorizedKeysFile /home/%u/.ssh/authorized_keys
+
+# Disable password authentication
+PasswordAuthentication no
+
+# Allow root login only with keys (optional, improves security)
+PermitRootLogin prohibit-password
+
+# Use the standard port for SSH (inside the container)
+Port 22
 ```
-This will create:
-- **`sftp_server.key`** → Private key
-- **`sftp_server.crt`** → Public certificate
 
 ---
 
-## **2️⃣ Convert Certificate to SSH Format**
-SFTP (OpenSSH) does not directly use X.509 certificates. We must convert it into an SSH key pair.
+## **2️⃣ Modify Dockerfile to Use the Custom Config**
+Now, update the **Dockerfile** to copy this config into the container.
 
-### **Generate an SSH Private Key from the SSL Key**
-```sh
-ssh-keygen -t rsa -b 4096 -f sftp_ssh_key -m PEM
-```
-This will create:
-- **`sftp_ssh_key`** (private key)
-- **`sftp_ssh_key.pub`** (public key)
-
-### **Convert OpenSSH Key to X.509 Format**
-```sh
-ssh-keygen -s sftp_server.key -I sftp_cert -n user -V +365d sftp_ssh_key.pub
-```
-This signs the SSH key using our SSL certificate.
-
----
-
-## **3️⃣ Setup Dockerized SFTP Server**
-Create a **Dockerfile** to configure the SFTP server.
-
-### **📌 `Dockerfile`**
+📌 **`Dockerfile`**
 ```dockerfile
 FROM atmoz/sftp
 
 # Create required directories
-RUN mkdir -p /home/user/.ssh /home/user/upload
+RUN mkdir -p /home/user/.ssh /etc/ssh
 
-# Copy keys and certificates
+# Copy the custom SSH configuration file
+COPY sshd_config /etc/ssh/sshd_config
+
+# Copy public key for authentication
 COPY sftp_ssh_key.pub /home/user/.ssh/authorized_keys
 
-# Set proper permissions
+# Set permissions
 RUN chmod 700 /home/user/.ssh && \
-    chmod 600 /home/user/.ssh/authorized_keys
+    chmod 600 /home/user/.ssh/authorized_keys && \
+    chown -R user:user /home/user/.ssh
 
-# Start the container
+# Expose SFTP Port
+EXPOSE 22
+
+# Start SSHD
 CMD ["/entrypoint", "user:1001:1001"]
 ```
 
 ---
 
-## **4️⃣ `docker-compose.yml`**
+## **3️⃣ Modify `docker-compose.yml`**
+Ensure your `docker-compose.yml` correctly maps volumes and ports.
+
+📌 **`docker-compose.yml`**
 ```yaml
 version: "3.8"
 
@@ -75,28 +78,49 @@ services:
 
 ---
 
-## **5️⃣ Start the SFTP Server**
+## **4️⃣ Build and Start the SFTP Server**
 ```sh
 docker-compose up -d --build
 ```
 
 ---
 
-## **6️⃣ Connect to the SFTP Server**
-Copy the private key to the correct permissions:
+## **5️⃣ Verify SSH Configuration Inside the Container**
+After starting the container, connect to it:
 ```sh
-chmod 600 sftp_ssh_key
+docker exec -it sftp_server sh
 ```
-Then, connect using:
+Then check if the SSH configuration is applied correctly:
 ```sh
-sftp -i sftp_ssh_key -P 2222 user@localhost
+grep "PubkeyAuthentication" /etc/ssh/sshd_config
+grep "AuthorizedKeysFile" /etc/ssh/sshd_config
+```
+Expected output:
+```
+PubkeyAuthentication yes
+AuthorizedKeysFile /home/%u/.ssh/authorized_keys
+```
+
+If correct, restart SSH inside the container:
+```sh
+service ssh restart
 ```
 
 ---
 
-### **✅ Features:**
-✔ Uses self-signed certificates for authentication  
-✔ Automates everything in Docker  
-✔ No password required  
+## **6️⃣ Test SFTP Connection**
+On your local machine, connect using:
+```sh
+sftp -i sftp_ssh_key -P 2222 user@localhost
+```
+If everything is set up correctly, it should authenticate without asking for a password.
 
-This method ensures a **secure SFTP setup with certificate-based authentication** inside Docker! 🚀
+---
+
+## **✅ Summary**
+✔ **Enabled** Public Key Authentication (`PubkeyAuthentication yes`)  
+✔ **Set `AuthorizedKeysFile`** to `/home/%u/.ssh/authorized_keys`  
+✔ **Disabled Password Authentication** for security  
+✔ **Configured Everything in Docker** for automation  
+
+Now your **SFTP server in Docker fully supports public key authentication!** 🚀 Let me know if you need any tweaks!
