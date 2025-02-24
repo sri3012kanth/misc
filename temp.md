@@ -1,59 +1,64 @@
-Here's a fully automated setup using Docker and Docker Compose that ensures key generation, permissions, and configurations are handled inside the container.
+To configure the SFTP server with certificate-based authentication using a locally generated certificate (instead of SSH key pairs), follow these steps:
 
 ---
 
-## **1️⃣ Directory Structure**
+## **1️⃣ Generate an SSL Certificate for SFTP**
+We will generate a self-signed certificate and use it for authentication.
+
+### **Generate a Key Pair & Certificate**
+Run the following command in your terminal to generate a private key and public certificate:
+```sh
+openssl req -x509 -newkey rsa:4096 -keyout sftp_server.key -out sftp_server.crt -days 365 -nodes
 ```
-sftp-server/
-│── docker-compose.yml
-│── Dockerfile
-│── sftp_setup.sh
-│── sftp_key (generated automatically)
-│── sftp_key.pub (generated automatically)
-```
+This will create:
+- **`sftp_server.key`** → Private key
+- **`sftp_server.crt`** → Public certificate
 
 ---
 
-## **2️⃣ `Dockerfile` (Automates Key Setup & Permissions)**
+## **2️⃣ Convert Certificate to SSH Format**
+SFTP (OpenSSH) does not directly use X.509 certificates. We must convert it into an SSH key pair.
+
+### **Generate an SSH Private Key from the SSL Key**
+```sh
+ssh-keygen -t rsa -b 4096 -f sftp_ssh_key -m PEM
+```
+This will create:
+- **`sftp_ssh_key`** (private key)
+- **`sftp_ssh_key.pub`** (public key)
+
+### **Convert OpenSSH Key to X.509 Format**
+```sh
+ssh-keygen -s sftp_server.key -I sftp_cert -n user -V +365d sftp_ssh_key.pub
+```
+This signs the SSH key using our SSL certificate.
+
+---
+
+## **3️⃣ Setup Dockerized SFTP Server**
+Create a **Dockerfile** to configure the SFTP server.
+
+### **📌 `Dockerfile`**
 ```dockerfile
 FROM atmoz/sftp
 
-# Create user and directories
-RUN mkdir -p /home/user/.ssh /home/user/upload \
-    && chmod 700 /home/user/.ssh /home/user/upload
+# Create required directories
+RUN mkdir -p /home/user/.ssh /home/user/upload
 
-# Copy script to setup SSH keys and set permissions
-COPY sftp_setup.sh /sftp_setup.sh
-RUN chmod +x /sftp_setup.sh
+# Copy keys and certificates
+COPY sftp_ssh_key.pub /home/user/.ssh/authorized_keys
 
-# Execute script on container startup
-CMD ["/bin/sh", "-c", "/sftp_setup.sh && exec /entrypoint user:1001:1001"]
+# Set proper permissions
+RUN chmod 700 /home/user/.ssh && \
+    chmod 600 /home/user/.ssh/authorized_keys
+
+# Start the container
+CMD ["/entrypoint", "user:1001:1001"]
 ```
 
 ---
 
-## **3️⃣ `sftp_setup.sh` (Automates Key Generation & Permissions)**
-```sh
-#!/bin/sh
-
-# Generate SSH key pair if not exists
-if [ ! -f "/home/user/.ssh/sftp_key" ]; then
-    ssh-keygen -t rsa -b 4096 -f /home/user/.ssh/sftp_key -q -N ""
-fi
-
-# Set permissions
-chmod 700 /home/user/.ssh
-chmod 600 /home/user/.ssh/sftp_key
-chmod 644 /home/user/.ssh/sftp_key.pub
-
-# Ensure authorized_keys exists
-cat /home/user/.ssh/sftp_key.pub > /home/user/.ssh/authorized_keys
-chmod 600 /home/user/.ssh/authorized_keys
-```
-
----
-
-## **4️⃣ `docker-compose.yml` (Automates Deployment)**
+## **4️⃣ `docker-compose.yml`**
 ```yaml
 version: "3.8"
 
@@ -70,29 +75,28 @@ services:
 
 ---
 
-## **5️⃣ Deploy & Connect**
-### **🚀 Build & Run**
+## **5️⃣ Start the SFTP Server**
 ```sh
 docker-compose up -d --build
 ```
 
-### **🔑 Fetch Generated Private Key**
-```sh
-docker cp sftp_server:/home/user/.ssh/sftp_key .
-chmod 600 sftp_key
-```
+---
 
-### **🔗 Connect to SFTP Server**
+## **6️⃣ Connect to the SFTP Server**
+Copy the private key to the correct permissions:
 ```sh
-sftp -i sftp_key -P 2222 user@localhost
+chmod 600 sftp_ssh_key
+```
+Then, connect using:
+```sh
+sftp -i sftp_ssh_key -P 2222 user@localhost
 ```
 
 ---
 
 ### **✅ Features:**
-✅ Automated SSH key generation  
-✅ Correct permissions handled inside Docker  
-✅ One-command deployment  
-✅ Persistent SFTP storage  
+✔ Uses self-signed certificates for authentication  
+✔ Automates everything in Docker  
+✔ No password required  
 
-This is a **fully automated** SFTP test server running on Docker! 🚀
+This method ensures a **secure SFTP setup with certificate-based authentication** inside Docker! 🚀
