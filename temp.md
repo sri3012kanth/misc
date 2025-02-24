@@ -1,167 +1,98 @@
-To set up **Python logging** similar to **Spring Boot**, you can use Python’s built-in `logging` module and configure it for structured, customizable output. Here's how you can set it up:
+Here's a fully automated setup using Docker and Docker Compose that ensures key generation, permissions, and configurations are handled inside the container.
 
 ---
 
-## **1. Basic Logging Setup**
-```python
-import logging
-
-# Basic configuration
-logging.basicConfig(
-    level=logging.INFO,  # Set logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",  # Log format
-    datefmt="%Y-%m-%d %H:%M:%S"  # Date format
-)
-
-# Example logger
-logger = logging.getLogger("myApp")  # Similar to package name in Spring Boot
-
-def sample_function():
-    logger.debug("Debug message for tracing")
-    logger.info("Informational message")
-    logger.warning("Warning message")
-    logger.error("Error message")
-    logger.critical("Critical error message")
-
-if __name__ == "__main__":
-    sample_function()
+## **1️⃣ Directory Structure**
 ```
-
-**Sample Output:**
-```
-2025-02-04 15:30:01 - INFO - myApp - Informational message
-2025-02-04 15:30:01 - WARNING - myApp - Warning message
-2025-02-04 15:30:01 - ERROR - myApp - Error message
-2025-02-04 15:30:01 - CRITICAL - myApp - Critical error message
+sftp-server/
+│── docker-compose.yml
+│── Dockerfile
+│── sftp_setup.sh
+│── sftp_key (generated automatically)
+│── sftp_key.pub (generated automatically)
 ```
 
 ---
 
-## **2. Advanced Configuration with Logging Levels**
-Create a **logging configuration file** (e.g., `logging.conf`):
+## **2️⃣ `Dockerfile` (Automates Key Setup & Permissions)**
+```dockerfile
+FROM atmoz/sftp
 
-```ini
-[loggers]
-keys=root,myApp
+# Create user and directories
+RUN mkdir -p /home/user/.ssh /home/user/upload \
+    && chmod 700 /home/user/.ssh /home/user/upload
 
-[handlers]
-keys=consoleHandler,fileHandler
+# Copy script to setup SSH keys and set permissions
+COPY sftp_setup.sh /sftp_setup.sh
+RUN chmod +x /sftp_setup.sh
 
-[formatters]
-keys=simpleFormatter,detailedFormatter
-
-[logger_root]
-level=WARNING
-handlers=consoleHandler
-
-[logger_myApp]
-level=DEBUG
-handlers=consoleHandler,fileHandler
-qualname=myApp
-propagate=0
-
-[handler_consoleHandler]
-class=StreamHandler
-level=DEBUG
-formatter=detailedFormatter
-args=(sys.stdout,)
-
-[handler_fileHandler]
-class=FileHandler
-level=INFO
-formatter=detailedFormatter
-args=("app.log", "a")
-
-[formatter_simpleFormatter]
-format=%(levelname)s - %(message)s
-
-[formatter_detailedFormatter]
-format=%(asctime)s - %(levelname)s - %(name)s - %(message)s
-datefmt=%Y-%m-%d %H:%M:%S
-```
-
-### **Using the Configuration in Code**
-```python
-import logging
-import logging.config
-
-# Load configuration from file
-logging.config.fileConfig("logging.conf")
-
-# Get logger
-logger = logging.getLogger("myApp")
-
-def sample_function():
-    logger.debug("Debugging details")
-    logger.info("Application started")
-    logger.warning("Low disk space")
-    logger.error("Failed to connect to database")
-    logger.critical("Application crash")
-
-if __name__ == "__main__":
-    sample_function()
+# Execute script on container startup
+CMD ["/bin/sh", "-c", "/sftp_setup.sh && exec /entrypoint user:1001:1001"]
 ```
 
 ---
 
-## **3. Logging in Cloud Run**
-When running in **Google Cloud Run**, structured logging can be enabled for better integration with **Cloud Logging**:
+## **3️⃣ `sftp_setup.sh` (Automates Key Generation & Permissions)**
+```sh
+#!/bin/sh
 
-### **Structured Logging (JSON Format)**
-```python
-import logging
-import json
-import sys
+# Generate SSH key pair if not exists
+if [ ! -f "/home/user/.ssh/sftp_key" ]; then
+    ssh-keygen -t rsa -b 4096 -f /home/user/.ssh/sftp_key -q -N ""
+fi
 
-class JsonFormatter(logging.Formatter):
-    def format(self, record):
-        log_entry = {
-            "timestamp": self.formatTime(record, self.datefmt),
-            "severity": record.levelname,
-            "message": record.getMessage(),
-            "name": record.name,
-            "module": record.module,
-            "funcName": record.funcName,
-        }
-        return json.dumps(log_entry)
+# Set permissions
+chmod 700 /home/user/.ssh
+chmod 600 /home/user/.ssh/sftp_key
+chmod 644 /home/user/.ssh/sftp_key.pub
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger("myApp")
-logger.handlers[0].setFormatter(JsonFormatter())
-
-# Sample log messages
-logger.info("Service started successfully")
-logger.error("Error processing request")
-```
-
-**Output in Cloud Logging:**
-```json
-{
-  "timestamp": "2025-02-04 15:30:01",
-  "severity": "INFO",
-  "message": "Service started successfully",
-  "name": "myApp",
-  "module": "main",
-  "funcName": "<module>"
-}
+# Ensure authorized_keys exists
+cat /home/user/.ssh/sftp_key.pub > /home/user/.ssh/authorized_keys
+chmod 600 /home/user/.ssh/authorized_keys
 ```
 
 ---
 
-## **4. Comparison with Spring Boot Logging**
-- **Spring Boot**: Uses Logback/SLF4J, supports different log levels and structured logging (JSON, XML).
-- **Python**: Uses `logging` module, configurable for various handlers (console, file, HTTP), supports JSON formatting.
+## **4️⃣ `docker-compose.yml` (Automates Deployment)**
+```yaml
+version: "3.8"
 
-## **Summary**
-- Configure Python logging to mimic Spring Boot with `logging` or `logging.config`.
-- Use **JSON formatting** for structured logging in **Cloud Run** or other cloud services.
-- Utilize **configuration files** for reusable, centralized logging settings.
+services:
+  sftp:
+    build: .
+    container_name: sftp_server
+    ports:
+      - "2222:22"
+    volumes:
+      - ./sftp_data:/home/user/upload
+    restart: always
+```
 
-Would you like examples for specific use cases or log message formats? 🚀
+---
+
+## **5️⃣ Deploy & Connect**
+### **🚀 Build & Run**
+```sh
+docker-compose up -d --build
+```
+
+### **🔑 Fetch Generated Private Key**
+```sh
+docker cp sftp_server:/home/user/.ssh/sftp_key .
+chmod 600 sftp_key
+```
+
+### **🔗 Connect to SFTP Server**
+```sh
+sftp -i sftp_key -P 2222 user@localhost
+```
+
+---
+
+### **✅ Features:**
+✅ Automated SSH key generation  
+✅ Correct permissions handled inside Docker  
+✅ One-command deployment  
+✅ Persistent SFTP storage  
+
+This is a **fully automated** SFTP test server running on Docker! 🚀
