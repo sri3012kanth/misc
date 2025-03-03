@@ -1,85 +1,78 @@
-When **Azure API Management (APIM) is created as an internal (VNET-integrated) instance**, the **Developer Portal "Publish" button may be disabled** due to network restrictions or missing configurations. Here’s how to fix it:
+Here's a **JUnit 5 + MockK** test for your `MigrateDryRunClientInterceptor` class. It mocks the dependencies and verifies the behavior of the `interceptCall` method.
+
+### Test Case:
+- Ensures that `interceptCall` correctly passes `callOptions` to `next.newCall`.
+- Verifies that the metadata header `IS_DRY_RUN_METADATA_KEY` is set correctly in `start`.
+- Uses MockK for mocking the `Channel`, `MethodDescriptor`, and other dependencies.
 
 ---
 
-## **🔹 1. Ensure You Have Admin Permissions**
-The **Publish** button is only available to **administrators**. Check your role:
+### **Test Implementation:**
+```kotlin
+import io.grpc.*
+import io.mockk.*
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
 
-```sh
-az role assignment list --assignee "<your-email-or-service-principal>"
-```
+class MigrateDryRunClientInterceptorTest {
 
-If needed, assign the **API Management Service Contributor** role:
+    private lateinit var interceptor: MigrateDryRunClientInterceptor
+    private lateinit var mockChannel: Channel
+    private lateinit var mockCall: ClientCall<Any, Any>
+    private lateinit var methodDescriptor: MethodDescriptor<Any, Any>
+    private lateinit var callOptions: CallOptions
 
-```sh
-az role assignment create --assignee "<your-email-or-service-principal>" --role "API Management Service Contributor" --scope "/subscriptions/<subscription-id>/resourceGroups/<resource-group-name>/providers/Microsoft.ApiManagement/service/<apim-name>"
-```
+    companion object {
+        val IS_DRY_RUN_METADATA_KEY = Metadata.Key.of("dry-run-key", Metadata.ASCII_STRING_MARSHALLER)
+        val IS_DRY_RUN_CALLOPTIONS_KEY = CallOptions.Key.create<Boolean>("dry-run-call-options")
+    }
 
----
+    @BeforeEach
+    fun setup() {
+        interceptor = MigrateDryRunClientInterceptor()
+        mockChannel = mockk()
+        mockCall = mockk(relaxed = true)
+        methodDescriptor = mockk()
+        callOptions = CallOptions.DEFAULT.withOption(IS_DRY_RUN_CALLOPTIONS_KEY, true)
 
-## **🔹 2. Enable Developer Portal in Internal APIM**
-For an **internal APIM**, the Developer Portal is **only accessible inside the VNET**. If you’re trying to access it from **your local machine** without proper network access, the **Publish button may be disabled**.
+        every { mockChannel.newCall(any(), any()) } returns mockCall
+    }
 
-### **🛠 Solution: Connect to APIM's Private Network**
-- Use **Azure Bastion**, **VPN**, or **a VM inside the VNET** to access the APIM instance.
-- If using an Azure VM, try SSH tunneling:
-  ```sh
-  ssh -L 8080:<APIM-PRIVATE-IP>:443 user@your-vm-ip
-  ```
-  Then, open **https://localhost:8080** in your browser.
+    @Test
+    fun `should intercept call and set dry-run metadata`() {
+        val interceptedCall = interceptor.interceptCall(methodDescriptor, callOptions, mockChannel)
 
----
+        // Verify that the new call is made using the correct method and call options
+        verify { mockChannel.newCall(methodDescriptor, callOptions) }
 
-## **🔹 3. Manually Publish Using Azure CLI**
-If the button remains disabled, **publish manually** via the Azure REST API:
+        // Mock Metadata and ResponseListener
+        val headers = Metadata()
+        val responseListener = mockk<ClientCall.Listener<Any>>(relaxed = true)
 
-```sh
-az rest --method post --uri "https://management.azure.com/subscriptions/<subscription-id>/resourceGroups/<resource-group-name>/providers/Microsoft.ApiManagement/service/<apim-name>/publish?api-version=2022-08-01"
-```
+        interceptedCall.start(responseListener, headers)
 
-This forces the Developer Portal to **publish changes** even if the UI button is disabled.
+        // Validate that the metadata header is set with the correct dry-run value
+        assertEquals("true", headers.get(IS_DRY_RUN_METADATA_KEY))
 
----
-
-## **🔹 4. Check Developer Portal URL & Network Settings**
-If your APIM is **internal**, confirm the Developer Portal URL:
-
-```sh
-az apim show --name "<apim-name>" --resource-group "<resource-group-name>" --query "hostnameConfigurations"
-```
-
-- If the URL is **private (only resolves inside VNET)**, ensure your local machine can reach it via:
-  ```sh
-  nslookup <your-apim-developer-portal-url>
-  ```
-
-If DNS resolution fails, **add a local hosts file entry**:
-```sh
-<APIM-PRIVATE-IP> <APIM-PRIVATE-DNS>
-```
-
----
-
-## **🔹 5. Restart Developer Portal**
-If the Developer Portal is stuck in an invalid state, restart it:
-
-```sh
-az apim update --name "<apim-name>" --resource-group "<resource-group-name>" --set developerPortal.enabled=false
-```
-Wait a few minutes, then enable it again:
-```sh
-az apim update --name "<apim-name>" --resource-group "<resource-group-name>" --set developerPortal.enabled=true
+        // Verify that start is called on the original call
+        verify { mockCall.start(responseListener, headers) }
+    }
+}
 ```
 
 ---
 
-### **✅ Summary of Fixes**
-| Issue | Fix |
-|-------|-----|
-| **Missing permissions** | Assign API Management Service Contributor role |
-| **Network access issue** | Use VPN, Bastion, or SSH Tunnel |
-| **UI Button disabled** | Publish via Azure REST API |
-| **Private APIM DNS not resolving** | Add hosts file entry or configure Private DNS |
-| **Portal stuck** | Restart Developer Portal |
+### **Explanation of the Test:**
+1. **Mocks dependencies**:
+   - `Channel`, `ClientCall`, `MethodDescriptor`, `CallOptions`, and `Metadata`.
+   
+2. **Intercepts a gRPC call**:
+   - Ensures `next.newCall` is called with the correct method and options.
 
-Let me know if you need further help! 🚀
+3. **Checks `start` behavior**:
+   - Ensures `IS_DRY_RUN_METADATA_KEY` is set correctly in `Metadata`.
+   - Uses `assertEquals` to verify the expected header value.
+   - Verifies that `start` is actually invoked on the forwarded call.
+
+This test ensures your interceptor correctly modifies the metadata before sending the request. Let me know if you need additional refinements!
