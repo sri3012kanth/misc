@@ -1,78 +1,78 @@
-Here's a **JUnit 5 + MockK** test for your `MigrateDryRunClientInterceptor` class. It mocks the dependencies and verifies the behavior of the `interceptCall` method.
-
-### Test Case:
-- Ensures that `interceptCall` correctly passes `callOptions` to `next.newCall`.
-- Verifies that the metadata header `IS_DRY_RUN_METADATA_KEY` is set correctly in `start`.
-- Uses MockK for mocking the `Channel`, `MethodDescriptor`, and other dependencies.
+To **publish the Developer Portal in Azure API Management (APIM)** using the **REST API** instead of clicking the button in the GUI, follow these steps:
 
 ---
 
-### **Test Implementation:**
-```kotlin
-import io.grpc.*
-import io.mockk.*
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
-import kotlin.test.assertEquals
+### **1. Get Required Authentication Details**
+Before calling the REST API, ensure you have the following:
+- **APIM Name** (e.g., `my-apim-service`)
+- **Resource Group Name** (e.g., `my-resource-group`)
+- **Azure Subscription ID**
+- **Authentication Token** (Azure AD Bearer token)
 
-class MigrateDryRunClientInterceptorTest {
+---
 
-    private lateinit var interceptor: MigrateDryRunClientInterceptor
-    private lateinit var mockChannel: Channel
-    private lateinit var mockCall: ClientCall<Any, Any>
-    private lateinit var methodDescriptor: MethodDescriptor<Any, Any>
-    private lateinit var callOptions: CallOptions
+### **2. Obtain an Azure AD Access Token**
+To call Azure management APIs, authenticate using Azure CLI:
 
-    companion object {
-        val IS_DRY_RUN_METADATA_KEY = Metadata.Key.of("dry-run-key", Metadata.ASCII_STRING_MARSHALLER)
-        val IS_DRY_RUN_CALLOPTIONS_KEY = CallOptions.Key.create<Boolean>("dry-run-call-options")
-    }
+```sh
+az login
+TOKEN=$(az account get-access-token --query accessToken --output tsv)
+```
 
-    @BeforeEach
-    fun setup() {
-        interceptor = MigrateDryRunClientInterceptor()
-        mockChannel = mockk()
-        mockCall = mockk(relaxed = true)
-        methodDescriptor = mockk()
-        callOptions = CallOptions.DEFAULT.withOption(IS_DRY_RUN_CALLOPTIONS_KEY, true)
-
-        every { mockChannel.newCall(any(), any()) } returns mockCall
-    }
-
-    @Test
-    fun `should intercept call and set dry-run metadata`() {
-        val interceptedCall = interceptor.interceptCall(methodDescriptor, callOptions, mockChannel)
-
-        // Verify that the new call is made using the correct method and call options
-        verify { mockChannel.newCall(methodDescriptor, callOptions) }
-
-        // Mock Metadata and ResponseListener
-        val headers = Metadata()
-        val responseListener = mockk<ClientCall.Listener<Any>>(relaxed = true)
-
-        interceptedCall.start(responseListener, headers)
-
-        // Validate that the metadata header is set with the correct dry-run value
-        assertEquals("true", headers.get(IS_DRY_RUN_METADATA_KEY))
-
-        // Verify that start is called on the original call
-        verify { mockCall.start(responseListener, headers) }
-    }
-}
+Alternatively, if using **Service Principal**, authenticate with:
+```sh
+az login --service-principal -u <appId> -p <password> --tenant <tenantId>
 ```
 
 ---
 
-### **Explanation of the Test:**
-1. **Mocks dependencies**:
-   - `Channel`, `ClientCall`, `MethodDescriptor`, `CallOptions`, and `Metadata`.
-   
-2. **Intercepts a gRPC call**:
-   - Ensures `next.newCall` is called with the correct method and options.
+### **3. Publish the Developer Portal Using REST API**
+The following REST API **POST** request will publish the Developer Portal:
 
-3. **Checks `start` behavior**:
-   - Ensures `IS_DRY_RUN_METADATA_KEY` is set correctly in `Metadata`.
-   - Uses `assertEquals` to verify the expected header value.
-   - Verifies that `start` is actually invoked on the forwarded call.
+```sh
+curl -X POST "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portal/release?api-version=2022-08-01"
+-H "Authorization: Bearer $TOKEN"
+-H "Content-Type: application/json"
+```
 
-This test ensures your interceptor correctly modifies the metadata before sending the request. Let me know if you need additional refinements!
+#### **Replace the placeholders:**
+- `{subscriptionId}` → Your **Azure Subscription ID**
+- `{resourceGroupName}` → Your **APIM Resource Group**
+- `{serviceName}` → Your **APIM Instance Name**
+
+---
+
+### **4. Verify the Portal Status**
+To check if the **Developer Portal is published**, run:
+
+```sh
+curl -X GET "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portal/tenant/settings?api-version=2022-08-01" \
+-H "Authorization: Bearer $TOKEN"
+```
+
+Look for a field like `"portalIsPublished": true` in the response.
+
+---
+
+### **5. Alternative: Use Azure CLI**
+You can also trigger the portal publication via **Azure CLI**:
+
+```sh
+az rest --method post \
+  --uri "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portal/release?api-version=2022-08-01" \
+  --headers "Authorization=Bearer $TOKEN"
+```
+
+---
+
+### **Summary**
+| **Method**  | **Command**  |
+|-------------|-------------|
+| **REST API**  | `POST /portal/release` |
+| **Azure CLI**  | `az rest --method post ...` |
+
+This will **automatically publish the Developer Portal** in APIM without needing to click the "Publish" button in the UI.
+
+---
+
+Let me know if you need further assistance! 🚀
