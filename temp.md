@@ -1,78 +1,70 @@
-To **publish the Developer Portal in Azure API Management (APIM)** using the **REST API** instead of clicking the button in the GUI, follow these steps:
+In Azure API Management (APIM), you can **publish** the **Developer Portal** using the **Azure REST API**. Here’s how you can do it:
 
 ---
 
-### **1. Get Required Authentication Details**
-Before calling the REST API, ensure you have the following:
+## **1. Get Required Authentication Details**
+You need:
 - **APIM Name** (e.g., `my-apim-service`)
 - **Resource Group Name** (e.g., `my-resource-group`)
 - **Azure Subscription ID**
-- **Authentication Token** (Azure AD Bearer token)
+- **Azure Management API Authentication** (via `Bearer` token)
 
 ---
 
-### **2. Obtain an Azure AD Access Token**
-To call Azure management APIs, authenticate using Azure CLI:
+## **2. Obtain Access Token**
+You must authenticate with **Azure AD** to get a token:
 
 ```sh
 az login
 TOKEN=$(az account get-access-token --query accessToken --output tsv)
 ```
 
-Alternatively, if using **Service Principal**, authenticate with:
-```sh
-az login --service-principal -u <appId> -p <password> --tenant <tenantId>
-```
-
 ---
 
-### **3. Publish the Developer Portal Using REST API**
-The following REST API **POST** request will publish the Developer Portal:
+## **3. Publish the Developer Portal**
+Use the following REST API **PUT** request:
 
 ```sh
-curl -X POST "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portal/release?api-version=2022-08-01"
+curl -X PUT "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portalsettings/delegation?api-version=2022-08-01"
 -H "Authorization: Bearer $TOKEN"
 -H "Content-Type: application/json"
+-d '{
+  "properties": {
+    "isDelegationEnabled": true
+  }
+}'
 ```
 
-#### **Replace the placeholders:**
-- `{subscriptionId}` → Your **Azure Subscription ID**
-- `{resourceGroupName}` → Your **APIM Resource Group**
-- `{serviceName}` → Your **APIM Instance Name**
+Replace:
+- `{subscriptionId}` → Your Azure Subscription ID
+- `{resourceGroupName}` → Your APIM Resource Group
+- `{serviceName}` → Your APIM Instance Name
 
 ---
 
-### **4. Verify the Portal Status**
-To check if the **Developer Portal is published**, run:
-
+## **4. Verify the Portal Deployment**
+Run:
 ```sh
-curl -X GET "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portal/tenant/settings?api-version=2022-08-01" \
+curl -X GET "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portalsettings/delegation?api-version=2022-08-01" \
 -H "Authorization: Bearer $TOKEN"
 ```
 
-Look for a field like `"portalIsPublished": true` in the response.
+If `isDelegationEnabled` is `true`, the portal is published.
 
 ---
 
-### **5. Alternative: Use Azure CLI**
-You can also trigger the portal publication via **Azure CLI**:
-
+## **5. Alternative: Publish via Azure CLI**
 ```sh
-az rest --method post \
-  --uri "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portal/release?api-version=2022-08-01" \
-  --headers "Authorization=Bearer $TOKEN"
+az apim update --name {serviceName} --resource-group {resourceGroupName} --set portalSettings.delegation.isDelegationEnabled=true
 ```
 
 ---
 
-### **Summary**
-| **Method**  | **Command**  |
-|-------------|-------------|
-| **REST API**  | `POST /portal/release` |
-| **Azure CLI**  | `az rest --method post ...` |
+### **Additional Notes**
+- The Developer Portal uses **delegation settings** for sign-in and subscription requests.
+- If the API version **changes**, use `az rest` to check available versions:
+  ```sh
+  az rest --method get --uri "https://management.azure.com/providers/Microsoft.ApiManagement?api-version=2022-08-01"
+  ```
 
-This will **automatically publish the Developer Portal** in APIM without needing to click the "Publish" button in the UI.
-
----
-
-Let me know if you need further assistance! 🚀
+Let me know if you need further clarifications! 🚀
