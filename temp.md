@@ -1,70 +1,15 @@
-In Azure API Management (APIM), you can **publish** the **Developer Portal** using the **Azure REST API**. Here’s how you can do it:
+You can rewrite the logic for `countryCallingCode` as follows:
 
----
-
-## **1. Get Required Authentication Details**
-You need:
-- **APIM Name** (e.g., `my-apim-service`)
-- **Resource Group Name** (e.g., `my-resource-group`)
-- **Azure Subscription ID**
-- **Azure Management API Authentication** (via `Bearer` token)
-
----
-
-## **2. Obtain Access Token**
-You must authenticate with **Azure AD** to get a token:
-
-```sh
-az login
-TOKEN=$(az account get-access-token --query accessToken --output tsv)
+```json
+"countryCallingCode": "{{#if (endsWith (substring (jsonPath (base64 request.headers.protected-parameters decode=true) '$.customerId') 3) '0')}}''{{else}}'+1'{{/if}}"
 ```
 
----
+### Explanation:
+1. Extracts the `customerId` using `jsonPath`.
+2. Decodes it from Base64 if needed.
+3. Uses `substring` to extract the last three characters.
+4. Checks if the extracted value ends with '0' using `endsWith`.
+5. If it ends with '0', returns an empty string (`''`).
+6. Otherwise, returns `+1`.
 
-## **3. Publish the Developer Portal**
-Use the following REST API **PUT** request:
-
-```sh
-curl -X PUT "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portalsettings/delegation?api-version=2022-08-01"
--H "Authorization: Bearer $TOKEN"
--H "Content-Type: application/json"
--d '{
-  "properties": {
-    "isDelegationEnabled": true
-  }
-}'
-```
-
-Replace:
-- `{subscriptionId}` → Your Azure Subscription ID
-- `{resourceGroupName}` → Your APIM Resource Group
-- `{serviceName}` → Your APIM Instance Name
-
----
-
-## **4. Verify the Portal Deployment**
-Run:
-```sh
-curl -X GET "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{serviceName}/portalsettings/delegation?api-version=2022-08-01" \
--H "Authorization: Bearer $TOKEN"
-```
-
-If `isDelegationEnabled` is `true`, the portal is published.
-
----
-
-## **5. Alternative: Publish via Azure CLI**
-```sh
-az apim update --name {serviceName} --resource-group {resourceGroupName} --set portalSettings.delegation.isDelegationEnabled=true
-```
-
----
-
-### **Additional Notes**
-- The Developer Portal uses **delegation settings** for sign-in and subscription requests.
-- If the API version **changes**, use `az rest` to check available versions:
-  ```sh
-  az rest --method get --uri "https://management.azure.com/providers/Microsoft.ApiManagement?api-version=2022-08-01"
-  ```
-
-Let me know if you need further clarifications! 🚀
+Let me know if you need further modifications!
