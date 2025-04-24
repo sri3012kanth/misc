@@ -1,173 +1,110 @@
-To directly listen to changes as entities instead of using raw `Document` objects and manually converting them, you can leverage Spring Data's `DefaultMessageListenerContainer` and its support for type-safe listeners.
-
-Here’s how you can listen to changes as entities:
+Here's a sample documentation outline and content for **Disaster Recovery (DR) Testing** of a MongoDB change stream application deployed in **Azure Kubernetes Service (AKS)** across **East and West** clusters, covering **three scenarios**:
 
 ---
 
-### **Updated Implementation**
+## 🧪 AKS MongoDB Change Stream Application – DR Testing (East & West Cluster)
 
-#### 1. **Entity Class**
-
-Define your entity with the necessary annotations:
-
-```kotlin
-import org.springframework.data.annotation.Id
-import org.springframework.data.mongodb.core.mapping.Document
-
-@Document(collection = "custom_collection")
-data class CustomEntity(
-    @Id val id: String? = null,
-    val name: String,
-    val value: String,
-    val entityType: String
-)
-```
+### 🎯 Objective
+To validate the failover and recovery of a MongoDB change stream listener application deployed in both East and West AKS clusters under different failure and recovery scenarios.
 
 ---
 
-#### 2. **Service with Type-Safe Listener**
+## 🔧 Setup Summary
 
-Use `DefaultMessageListenerContainer` to listen to changes and directly map them to your entity class (`CustomEntity`):
-
-```kotlin
-import org.springframework.data.mongodb.core.ChangeStreamOptions
-import org.springframework.data.mongodb.core.MongoTemplate
-import org.springframework.data.mongodb.core.messaging.DefaultMessageListenerContainer
-import org.springframework.data.mongodb.core.messaging.Message
-import org.springframework.data.mongodb.core.messaging.MessageListener
-import org.springframework.data.mongodb.core.messaging.SubscriptionRequest
-import org.springframework.stereotype.Service
-import javax.annotation.PostConstruct
-
-@Service
-class EntityChangeStreamService(private val mongoTemplate: MongoTemplate) {
-
-    private lateinit var listenerContainer: DefaultMessageListenerContainer
-
-    @PostConstruct
-    fun init() {
-        listenerContainer = DefaultMessageListenerContainer(mongoTemplate)
-        listenerContainer.start()
-
-        println("DefaultMessageListenerContainer started for entity change stream.")
-
-        val options = ChangeStreamOptions.builder()
-            .filter(
-                org.springframework.data.mongodb.core.query.Criteria.where("fullDocument.entityType")
-                    .`is`("specific_entity")
-            )
-            .returnFullDocumentOnUpdate()
-            .build()
-
-        val subscriptionRequest = SubscriptionRequest.builder()
-            .collection("custom_collection")
-            .options(options)
-            .publishTo(entityMessageListener())
-            .build()
-
-        listenerContainer.register(subscriptionRequest)
-
-        println("Change stream subscription created for entity: CustomEntity")
-    }
-
-    private fun entityMessageListener(): MessageListener<CustomEntity, CustomEntity> {
-        return MessageListener { message: Message<CustomEntity, CustomEntity> ->
-            handleEntityChange(message.body)
-        }
-    }
-
-    private fun handleEntityChange(entity: CustomEntity?) {
-        if (entity != null) {
-            println("Change detected for entity: $entity")
-            // Process the change event (e.g., save to a different collection, trigger downstream processing, etc.)
-        } else {
-            println("No entity found in the change event.")
-        }
-    }
-
-    fun stopListener() {
-        listenerContainer.stop()
-        println("Stopped DefaultMessageListenerContainer.")
-    }
-}
-```
+- **MongoDB Cluster**: Azure Cosmos DB (MongoDB API) with global distribution enabled.
+- **App**: Change stream listener deployed in both East and West AKS clusters.
+- **Failover Logic**: Only one region actively processes events at any time.
+- **Mechanism**: 
+  - Leader election (via distributed lock like Redis, etcd, or Cosmos DB itself).
+  - Heartbeat and fencing to avoid dual processing.
+  - StatefulSet/Deployment with readiness/liveness probes.
 
 ---
 
-### **How It Works**
+## 📁 Test Scenarios
 
-1. **Change Stream Options**:
-   - Configures the change stream to filter based on the `entityType` field.
-   - Ensures the listener gets the full document (`returnFullDocumentOnUpdate`).
+### ✅ Scenario 1: Normal Operation – Both Clusters Online
 
-2. **Entity Listener**:
-   - The `MessageListener` is configured with type parameters (`CustomEntity, CustomEntity`).
-   - The `message.body` directly maps to the `CustomEntity`.
+**Steps:**
 
-3. **Type Mapping**:
-   - Spring Data MongoDB automatically maps the MongoDB document to the `CustomEntity` using the `MongoTemplate` and registered converters.
+1. Start the application in both East and West clusters.
+2. Observe logs to verify that only one region (e.g., East) is actively processing events.
+3. Validate change stream event handling and processing.
+4. Confirm passive mode in the secondary region (e.g., West).
 
-4. **Lifecycle Management**:
-   - The container starts on application initialization (`@PostConstruct`) and stops gracefully when required.
+**Expected Outcome:**
 
----
-
-### **Advantages of Direct Entity Mapping**
-
-- **Simplicity**: Avoids manual conversion from `Document` to `CustomEntity`.
-- **Type Safety**: Ensures the change stream data aligns with the expected entity structure.
-- **Spring Ecosystem**: Leverages Spring's default `MongoConverter` for seamless mapping.
+- Only East processes changes.
+- West logs idle/watching state.
+- No duplicate or missed events.
 
 ---
 
-### **Testing**
+### 🚫 Scenario 2: East Down, West Takes Over
 
-1. Insert a document into the collection:
-   ```javascript
-   db.custom_collection.insertOne({
-       "name": "Test Entity",
-       "value": "100",
-       "entityType": "specific_entity"
-   })
-   ```
+**Steps:**
 
-2. Update a document:
-   ```javascript
-   db.custom_collection.updateOne(
-       { "entityType": "specific_entity" },
-       { $set: { "value": "200" } }
-   )
-   ```
+1. Simulate a failure in East AKS:
+   - Scale down pods or stop node pool.
+   - Or block East MongoDB endpoint via NSG/firewall.
+2. Monitor West cluster logs to confirm takeover.
+3. Generate change events to verify event capture by West.
+4. Validate event integrity and continuity.
 
-3. Delete a document:
-   ```javascript
-   db.custom_collection.deleteOne({ "entityType": "specific_entity" })
-   ```
+**Expected Outcome:**
+
+- West detects East failure (e.g., lease expired or heartbeat stopped).
+- West switches to active mode and starts processing.
+- No event loss; no duplication.
+- Monitoring/alerting should trigger.
 
 ---
 
-### **Output Example**
+### 🔁 Scenario 3: East Recovers, West Goes Down
 
-For the above operations, the service logs would look like this:
+**Steps:**
 
-```
-DefaultMessageListenerContainer started for entity change stream.
-Change stream subscription created for entity: CustomEntity
-Change detected for entity: CustomEntity(id=64b8b8b8b8b8b8b8b8b8b8, name=Test Entity, value=100, entityType=specific_entity)
-Change detected for entity: CustomEntity(id=64b8b8b8b8b8b8b8b8b8b8, name=Test Entity, value=200, entityType=specific_entity)
-```
+1. Bring East AKS back online.
+2. Allow sufficient time for readiness/liveness probes to succeed.
+3. Simulate failure in West AKS.
+4. Ensure East regains leadership and resumes event processing.
+
+**Expected Outcome:**
+
+- East re-acquires active role.
+- West stops processing or is unreachable.
+- Events continue being processed correctly by East.
+- Confirm lease/acquire logic handles edge cases gracefully.
 
 ---
 
-### **Notes**
+## 📋 Test Artifacts
 
-1. **Mapping Requirements**:
-   - Ensure your MongoDB document structure matches the `CustomEntity` class fields.
+- **Logs**: From East and West deployments (timestamped).
+- **Monitoring Dashboards**: CPU, memory, event lag, processing status.
+- **Screenshots**: Kubernetes Pod status, lease status, failover trigger.
+- **Validation Events**: JSON of sample MongoDB events processed.
 
-2. **Error Handling**:
-   - Add exception handling in `handleEntityChange` for cases where the mapping fails.
+---
 
-3. **Extensibility**:
-   - Extend the filtering logic in `ChangeStreamOptions` to include more criteria or stages if required.
+## 🛡️ DR Readiness Checklist
 
-Let me know if you'd like further clarifications or enhancements!
+| Item                              | Status ✅/❌ | Notes                          |
+|-----------------------------------|-------------|--------------------------------|
+| Passive cluster does not process | ✅          | Verified through logs          |
+| Failover detection logic         | ✅          | TTL-based lock                 |
+| Event continuity ensured         | ✅          | No event loss observed         |
+| East recovery & re-election      | ✅          | Graceful recovery              |
+| Monitoring/alerts setup          | ✅          | Azure Monitor, Prometheus      |
+
+---
+
+## 📦 Future Improvements
+
+- Add automated chaos testing (e.g., Azure Chaos Studio).
+- Implement regional priority fallback strategy.
+- Integrate DR test pipeline in CI/CD.
+
+---
+
+Would you like this exported as a PDF, Confluence-compatible doc, or Markdown file? I can also help turn it into a formal SOP if needed.
