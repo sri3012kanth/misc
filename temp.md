@@ -1,129 +1,112 @@
-Here's your **Confluence-friendly documentation** in **wiki markup format**, designed to be pasted directly into a Confluence page. It uses **expand macros**, **Confluence table syntax**, and clear grouping for **AKS**, **Azure Functions**, **Cloud Run**, and **GKE**.
+h1. 🔁 Platform Configuration Mapping
 
----
+----
 
-# 🔁 Platform Configuration Mapping
-
----
-
-## 🔧 General Mapping Table
+h2. 🔧 General Mapping Table
 
 || Config Type || AKS || Azure Functions || Cloud Run || GKE ||
-\| Environment Variables | ConfigMap / Helm | App Settings | `gcloud` CLI / YAML | ConfigMap / Helm |
-\| Secrets | Azure Key Vault + CSI Driver | Azure Key Vault via App Settings | Google Secret Manager | GCP Secret Manager / Kubernetes Secrets |
-\| Trigger Mechanism | K8s Eventing / Custom Controller | HTTP / Timer / Event Grid | Pub/Sub / Eventarc | Pub/Sub / Cloud Run |
-\| Identity & Access | Pod Identity / Workload Identity | Managed Identity | Service Account | Workload Identity |
+| Environment Variables | ConfigMap / Helm | App Settings | gcloud CLI / YAML | ConfigMap / Helm |
+| Secrets | Azure Key Vault + CSI Driver | Azure Key Vault via App Settings | Google Secret Manager | GCP Secret Manager / Kubernetes Secrets |
+| Trigger Mechanism | K8s Eventing / Custom Controller | HTTP / Timer / Event Grid | Pub/Sub / Eventarc | Pub/Sub / Cloud Run |
+| Identity & Access | Pod Identity / Workload Identity | Managed Identity | Service Account | Workload Identity |
 
----
+----
 
-## 🟦 Azure AKS
+h2. 🟦 Azure AKS
 
-{expand\:title=Environment Variables}
+{expand:title=🔧 Environment Variables}
 || Source || Use || Tool ||
-\| ConfigMap | Non-sensitive config | kubectl / Helm |
-\| Secret | Sensitive values | K8s Secret / CSI driver |
+| ConfigMap | Non-sensitive config | kubectl / Helm |
+| Secret | Sensitive values | K8s Secret / CSI driver |
 {expand}
 
-{expand\:title=Secrets}
+{expand:title=🔐 Secrets}
+* Use *Azure Key Vault* to store sensitive information  
+* Integrate via *Secrets Store CSI Driver*  
+* Access using *Pod Identity* or *Workload Identity*  
+{expand}
 
-* Use **Azure Key Vault** to store sensitive information
-* Integrate via **Secrets Store CSI Driver**
-* Access using **Pod Identity** or **Workload Identity**
-  {expand}
+{expand:title=🛡️ Service Accounts & IAM}
+* Map Kubernetes ServiceAccounts to Azure AD  
+* Use RBAC for vault, storage, etc.  
+* Grant least privilege to resources via RBAC roles  
+{expand}
 
-{expand\:title=Service Accounts & IAM}
+----
 
-* Map Kubernetes ServiceAccounts to Azure AD
-* Use RBAC for vault, storage, etc.
-* Grant least privilege to resources via RBAC roles
-  {expand}
+h2. ⚡ Azure Functions
 
----
-
-## ⚡ Azure Functions
-
-{expand\:title=Environment Variables}
+{expand:title=🔧 Environment Variables}
 || Setting || Value || Source ||
-\| DB\_URL | `jdbc:sqlserver://...` | App Settings |
-\| SECRET\_KEY | `@Microsoft.KeyVault(...)` | Key Vault Reference |
+| DB_URL | jdbc:sqlserver://... | App Settings |
+| SECRET_KEY | @Microsoft.KeyVault(...) | Key Vault Reference |
 {expand}
 
-{expand\:title=Secrets}
+{expand:title=🔐 Secrets}
+* Secrets stored in *Azure Key Vault*  
+* Use *Key Vault Reference Syntax* inside App Settings  
+* Authenticate using *System/User-assigned Managed Identity*  
+{expand}
 
-* Secrets stored in **Azure Key Vault**
-* Use **Key Vault Reference Syntax** inside App Settings
-* Authenticate using **System/User-assigned Managed Identity**
-  {expand}
+{expand:title=🛡️ Service Identity}
+* Use *Managed Identity* to access Key Vault, Storage, etc.  
+* Permissions assigned at resource or group level  
+{expand}
 
-{expand\:title=Service Identity}
+----
 
-* Use **Managed Identity** to access Key Vault, Storage, etc.
-* Permissions assigned at resource or group level
-  {expand}
+h2. ☁️ Google Cloud Run (Pub/Sub Trigger)
 
----
-
-## ☁️ Google Cloud Run (Pub/Sub Trigger)
-
-{expand\:title=Environment Variables}
+{expand:title=🔧 Environment Variables}
 || Name || Value || Set Method ||
-\| ENV | prod | `gcloud run deploy --set-env-vars` |
-\| SECRET\_KEY | Pulled from Secret Manager | Env or Volume |
+| ENV | prod | gcloud run deploy --set-env-vars |
+| SECRET_KEY | Pulled from Secret Manager | Env or Volume |
 {expand}
 
-{expand\:title=Secrets}
+{expand:title=🔐 Secrets}
+* Use *Google Secret Manager*  
+* Inject secrets as env variables or mounted volume  
+* Grant roles/secretmanager.secretAccessor to service account  
+{expand}
 
-* Use **Google Secret Manager**
-* Inject secrets as env variables or mounted volume
-* Grant `roles/secretmanager.secretAccessor` to service account
-  {expand}
+{expand:title=📩 Pub/Sub Trigger}
+* Trigger via *Eventarc* or direct *Pub/Sub subscription*  
+* Grant required permissions: pubsub.subscriber, run.invoker  
+{expand}
 
-{expand\:title=Pub/Sub Trigger}
+{expand:title=🛡️ Service Accounts}
+* Each Cloud Run service uses its own *GCP Service Account*  
+* Authenticate with Pub/Sub, Secret Manager, Cloud Logging, etc.  
+{expand}
 
-* Trigger via **Eventarc** or direct **Pub/Sub subscription**
-* Grant required permissions: `pubsub.subscriber`, `run.invoker`
-  {expand}
+----
 
-{expand\:title=Service Accounts}
+h2. 🐳 Google Kubernetes Engine (GKE)
 
-* Each Cloud Run service uses its own **GCP Service Account**
-* Authenticate with Pub/Sub, Secret Manager, Cloud Logging, etc.
-  {expand}
-
----
-
-## 🐳 GKE (Google Kubernetes Engine)
-
-{expand\:title=Environment Variables}
+{expand:title=🔧 Environment Variables}
 || Source || Use ||
-\| ConfigMap | Non-sensitive values (BASE\_URL, ENV) |
-\| Secret | Sensitive data (passwords, API keys) |
+| ConfigMap | Non-sensitive values (BASE_URL, ENV) |
+| Secret | Sensitive data (passwords, API keys) |
 {expand}
 
-{expand\:title=Secrets}
+{expand:title=🔐 Secrets}
+* Use *Kubernetes Secrets* or *Google Secret Manager*  
+* Recommended: Use *Workload Identity* to access GCP secrets securely  
+* Optionally sync with controller for auto updates  
+{expand}
 
-* Use **Kubernetes Secrets** or **Google Secret Manager**
-* Recommended: Use **Workload Identity** to access GCP secrets securely
-* Optionally sync with controller for auto updates
-  {expand}
+{expand:title=🛡️ Service Accounts & IAM}
+* Use *Workload Identity* to link K8s SA ↔ GCP SA  
+* GCP IAM grants access to Cloud APIs  
+* K8s RBAC for namespace-level restrictions  
+{expand}
 
-{expand\:title=Service Accounts & IAM}
+----
 
-* Use **Workload Identity** to link K8s SA ↔ GCP SA
-* GCP IAM grants access to Cloud APIs
-* K8s RBAC for namespace-level restrictions
-  {expand}
-
----
-
-## 🔐 Security & Identity Matrix
+h2. 🔐 Security & Identity Matrix
 
 || Platform || Identity Mechanism || Secret Storage || Least Privilege Strategy ||
-\| AKS | Pod Identity / Workload Identity | Azure Key Vault | Use AD roles with minimal access |
-\| Azure Functions | Managed Identity | Azure Key Vault | Resource-level RBAC |
-\| Cloud Run | GCP Service Account | Secret Manager | Per-service IAM roles |
-\| GKE | Workload Identity | Secret Manager / K8s Secret | GCP IAM + K8s RBAC |
-
----
-
-Would you like me to export this to a `.txt` file for upload or generate an attachment version you can directly import into Confluence via the storage format?
+| AKS | Pod Identity / Workload Identity | Azure Key Vault | Use AD roles with minimal access |
+| Azure Functions | Managed Identity | Azure Key Vault | Resource-level RBAC |
+| Cloud Run | GCP Service Account | Secret Manager | Per-service IAM roles |
+| GKE | Workload Identity | Secret Manager / K8s Secret | GCP IAM + K8s RBAC |
