@@ -1,110 +1,94 @@
-Here's a sample documentation outline and content for **Disaster Recovery (DR) Testing** of a MongoDB change stream application deployed in **Azure Kubernetes Service (AKS)** across **East and West** clusters, covering **three scenarios**:
+Here is the same **application-level documentation** using **Confluence wiki markup format**, including collapsible sections (using `{expand}`), and tables to capture environment variables, secrets, service accounts, and notes for each app.
 
 ---
 
-## 🧪 AKS MongoDB Change Stream Application – DR Testing (East & West Cluster)
+# 📘 Application Configuration Documentation (Confluence Format)
 
-### 🎯 Objective
-To validate the failover and recovery of a MongoDB change stream listener application deployed in both East and West AKS clusters under different failure and recovery scenarios.
-
----
-
-## 🔧 Setup Summary
-
-- **MongoDB Cluster**: Azure Cosmos DB (MongoDB API) with global distribution enabled.
-- **App**: Change stream listener deployed in both East and West AKS clusters.
-- **Failover Logic**: Only one region actively processes events at any time.
-- **Mechanism**: 
-  - Leader election (via distributed lock like Redis, etcd, or Cosmos DB itself).
-  - Heartbeat and fencing to avoid dual processing.
-  - StatefulSet/Deployment with readiness/liveness probes.
+This page documents per-application configuration values across environments. It includes environment variables, secrets, service identities, and key operational notes.
 
 ---
 
-## 📁 Test Scenarios
+## 🔹 **customer-service**
 
-### ✅ Scenario 1: Normal Operation – Both Clusters Online
+{expand\:title=🔧 Environment Variables}
+|| Key || Value/Example || Description || Source ||
+\| ENV | prod | Runtime environment | ConfigMap / App Settings |
+\| DB\_URL | jdbc\:sqlserver://... | Database connection string | ConfigMap / App Settings |
+\| API\_TIMEOUT | 5000 | Timeout in milliseconds | ConfigMap |
+{expand}
 
-**Steps:**
+{expand\:title=🔐 Secrets}
+|| Secret Key || Usage || Source || Notes ||
+\| DB\_PASSWORD | DB Authentication | Azure Key Vault | Referenced via CSI or App Settings |
+\| JWT\_SECRET | Token Signing | Secret Manager | Injected as env var or volume |
+{expand}
 
-1. Start the application in both East and West clusters.
-2. Observe logs to verify that only one region (e.g., East) is actively processing events.
-3. Validate change stream event handling and processing.
-4. Confirm passive mode in the secondary region (e.g., West).
+{expand\:title=🛡️ Service Account / Identity}
+|| Platform || Service Account Name || Permissions ||
+\| AKS | sa-customer-svc | Reader for Key Vault, DB |
+\| Cloud Run | [customer-svc@project.iam.gserviceaccount.com](mailto:customer-svc@project.iam.gserviceaccount.com) | Pub/Sub, SecretManager Access |
+{expand}
 
-**Expected Outcome:**
+{expand\:title=📝 Notes}
 
-- Only East processes changes.
-- West logs idle/watching state.
-- No duplicate or missed events.
-
----
-
-### 🚫 Scenario 2: East Down, West Takes Over
-
-**Steps:**
-
-1. Simulate a failure in East AKS:
-   - Scale down pods or stop node pool.
-   - Or block East MongoDB endpoint via NSG/firewall.
-2. Monitor West cluster logs to confirm takeover.
-3. Generate change events to verify event capture by West.
-4. Validate event integrity and continuity.
-
-**Expected Outcome:**
-
-- West detects East failure (e.g., lease expired or heartbeat stopped).
-- West switches to active mode and starts processing.
-- No event loss; no duplication.
-- Monitoring/alerting should trigger.
+* Ensure `JWT_SECRET` is rotated every 90 days
+* Requires access to `customer-profile` topic in Pub/Sub
+* Fails fast if `DB_URL` is incorrect
+  {expand}
 
 ---
 
-### 🔁 Scenario 3: East Recovers, West Goes Down
+## 🔹 **order-service**
 
-**Steps:**
+{expand\:title=🔧 Environment Variables}
+|| Key || Value/Example || Description || Source ||
+\| ENV | staging | Runtime environment | ConfigMap / YAML |
+\| ORDER\_QUEUE | orders-topic | Pub/Sub topic name | App Setting |
+{expand}
 
-1. Bring East AKS back online.
-2. Allow sufficient time for readiness/liveness probes to succeed.
-3. Simulate failure in West AKS.
-4. Ensure East regains leadership and resumes event processing.
+{expand\:title=🔐 Secrets}
+|| Secret Key || Usage || Source || Notes ||
+\| QUEUE\_TOKEN | Pub/Sub auth | Secret Manager | Least-privilege access |
+{expand}
 
-**Expected Outcome:**
+{expand\:title=🛡️ Service Account / Identity}
+|| Platform || Service Account Name || Permissions ||
+\| Cloud Run | [order-svc@project.iam.gserviceaccount.com](mailto:order-svc@project.iam.gserviceaccount.com) | Pub/Sub Publisher |
+{expand}
 
-- East re-acquires active role.
-- West stops processing or is unreachable.
-- Events continue being processed correctly by East.
-- Confirm lease/acquire logic handles edge cases gracefully.
+{expand\:title=📝 Notes}
 
----
-
-## 📋 Test Artifacts
-
-- **Logs**: From East and West deployments (timestamped).
-- **Monitoring Dashboards**: CPU, memory, event lag, processing status.
-- **Screenshots**: Kubernetes Pod status, lease status, failover trigger.
-- **Validation Events**: JSON of sample MongoDB events processed.
-
----
-
-## 🛡️ DR Readiness Checklist
-
-| Item                              | Status ✅/❌ | Notes                          |
-|-----------------------------------|-------------|--------------------------------|
-| Passive cluster does not process | ✅          | Verified through logs          |
-| Failover detection logic         | ✅          | TTL-based lock                 |
-| Event continuity ensured         | ✅          | No event loss observed         |
-| East recovery & re-election      | ✅          | Graceful recovery              |
-| Monitoring/alerts setup          | ✅          | Azure Monitor, Prometheus      |
+* Requires topic `orders-topic` to exist
+* Use dead-letter topic config for error handling
+* Rotate `QUEUE_TOKEN` every 30 days
+  {expand}
 
 ---
 
-## 📦 Future Improvements
+## 🧩 Template for New App
 
-- Add automated chaos testing (e.g., Azure Chaos Studio).
-- Implement regional priority fallback strategy.
-- Integrate DR test pipeline in CI/CD.
+Copy this block when adding a new application.
+
+{expand\:title=🔧 Environment Variables}
+|| Key || Value/Example || Description || Source ||
+\| EXAMPLE\_KEY | value | Example description | ConfigMap/App Settings |
+{expand}
+
+{expand\:title=🔐 Secrets}
+|| Secret Key || Usage || Source || Notes ||
+\| SECRET\_NAME | Description | Key Vault / Secret Manager | Additional info |
+{expand}
+
+{expand\:title=🛡️ Service Account / Identity}
+|| Platform || Service Account Name || Permissions ||
+\| Platform Name | service-account-name | Role / access description |
+{expand}
+
+{expand\:title=📝 Notes}
+
+* Notes about setup, dependencies, or conditions
+  {expand}
 
 ---
 
-Would you like this exported as a PDF, Confluence-compatible doc, or Markdown file? I can also help turn it into a formal SOP if needed.
+Would you like a downloadable `.confluence` file or should I prepare this for direct pasting into your Confluence page editor?
