@@ -1,72 +1,129 @@
-Removing the **country code** field from a phone number object in Cosmos DB, APIs, and downstream systems can have **significant impact** in terms of data quality, business logic, validation, internationalization, and integrations. Below is a detailed breakdown of the **impact and scope**:
+Here's your **Confluence-friendly documentation** in **wiki markup format**, designed to be pasted directly into a Confluence page. It uses **expand macros**, **Confluence table syntax**, and clear grouping for **AKS**, **Azure Functions**, **Cloud Run**, and **GKE**.
 
 ---
 
-### 🔍 1. **Data Model Impact in Cosmos DB**
-- **Field removal**:
-  - Documents that previously had `countryCode` will no longer have it.
-  - May break queries or indexes that depend on `countryCode`.
-- **Partitioning**:
-  - If `countryCode` was part of a **composite partition key**, you will face partitioning issues.
-- **Data consistency**:
-  - Mixed records (some with countryCode, some without) may emerge during migration unless handled properly.
+# 🔁 Platform Configuration Mapping
 
 ---
 
-### 🧩 2. **API Impact**
-- **Request/Response schema**:
-  - Clients expecting `countryCode` will either break or receive incomplete data.
-  - OpenAPI/Swagger specs must be updated to remove `countryCode`.
-- **Validation logic**:
-  - Validation frameworks (e.g., Bean Validation in Java/Kotlin) may fail if the field is still required.
-  - Regex or pattern checks that rely on countryCode-aware formatting will fail or give wrong results.
-- **Backward compatibility**:
-  - Breaking change for clients expecting `countryCode`. Versioning the API may be necessary.
+## 🔧 General Mapping Table
+
+|| Config Type || AKS || Azure Functions || Cloud Run || GKE ||
+\| Environment Variables | ConfigMap / Helm | App Settings | `gcloud` CLI / YAML | ConfigMap / Helm |
+\| Secrets | Azure Key Vault + CSI Driver | Azure Key Vault via App Settings | Google Secret Manager | GCP Secret Manager / Kubernetes Secrets |
+\| Trigger Mechanism | K8s Eventing / Custom Controller | HTTP / Timer / Event Grid | Pub/Sub / Eventarc | Pub/Sub / Cloud Run |
+\| Identity & Access | Pod Identity / Workload Identity | Managed Identity | Service Account | Workload Identity |
 
 ---
 
-### ⚙️ 3. **Downstream Services Impact**
-- **Phone normalization logic**:
-  - Services that normalize numbers (e.g., into E.164 format) will lack country context.
-- **SMS / Voice integrations**:
-  - Telecom APIs like Twilio or AWS Pinpoint need country code for routing.
-  - Could cause failures or delivery to wrong regions.
-- **Analytics and segmentation**:
-  - Geographical segmentation by country becomes inaccurate.
-  - Metrics by country will degrade unless inferred from other sources.
-- **Customer support and verification**:
-  - Phone-based authentication may break if the full international format is not provided.
-  - OTP, MFA, and fraud detection systems may lose precision.
+## 🟦 Azure AKS
+
+{expand\:title=Environment Variables}
+|| Source || Use || Tool ||
+\| ConfigMap | Non-sensitive config | kubectl / Helm |
+\| Secret | Sensitive values | K8s Secret / CSI driver |
+{expand}
+
+{expand\:title=Secrets}
+
+* Use **Azure Key Vault** to store sensitive information
+* Integrate via **Secrets Store CSI Driver**
+* Access using **Pod Identity** or **Workload Identity**
+  {expand}
+
+{expand\:title=Service Accounts & IAM}
+
+* Map Kubernetes ServiceAccounts to Azure AD
+* Use RBAC for vault, storage, etc.
+* Grant least privilege to resources via RBAC roles
+  {expand}
 
 ---
 
-### 📈 4. **User Experience Impact**
-- **Form auto-fill and validation**:
-  - Users entering a 10-digit number may not be validated properly without country context.
-- **International users**:
-  - Support for global phone numbers will be compromised.
-  - Can reduce usability or block users from outside your default country.
+## ⚡ Azure Functions
+
+{expand\:title=Environment Variables}
+|| Setting || Value || Source ||
+\| DB\_URL | `jdbc:sqlserver://...` | App Settings |
+\| SECRET\_KEY | `@Microsoft.KeyVault(...)` | Key Vault Reference |
+{expand}
+
+{expand\:title=Secrets}
+
+* Secrets stored in **Azure Key Vault**
+* Use **Key Vault Reference Syntax** inside App Settings
+* Authenticate using **System/User-assigned Managed Identity**
+  {expand}
+
+{expand\:title=Service Identity}
+
+* Use **Managed Identity** to access Key Vault, Storage, etc.
+* Permissions assigned at resource or group level
+  {expand}
 
 ---
 
-### 🔄 5. **Migration/Transition Considerations**
-- **Migration script**:
-  - You might need to strip `countryCode` from existing documents or migrate it into `phoneNumber` (e.g., `+19788768888`).
-- **Interim dual-field strategy**:
-  - Keep both `countryCode` and `phoneNumber` temporarily.
-  - Add a new `fullPhoneNumber` field in E.164 and migrate downstream to use that instead.
-- **Versioning strategy**:
-  - Consider releasing a new API version or schema version.
-  - Enable downstream services to migrate gradually.
+## ☁️ Google Cloud Run (Pub/Sub Trigger)
+
+{expand\:title=Environment Variables}
+|| Name || Value || Set Method ||
+\| ENV | prod | `gcloud run deploy --set-env-vars` |
+\| SECRET\_KEY | Pulled from Secret Manager | Env or Volume |
+{expand}
+
+{expand\:title=Secrets}
+
+* Use **Google Secret Manager**
+* Inject secrets as env variables or mounted volume
+* Grant `roles/secretmanager.secretAccessor` to service account
+  {expand}
+
+{expand\:title=Pub/Sub Trigger}
+
+* Trigger via **Eventarc** or direct **Pub/Sub subscription**
+* Grant required permissions: `pubsub.subscriber`, `run.invoker`
+  {expand}
+
+{expand\:title=Service Accounts}
+
+* Each Cloud Run service uses its own **GCP Service Account**
+* Authenticate with Pub/Sub, Secret Manager, Cloud Logging, etc.
+  {expand}
 
 ---
 
-### ✅ Recommendations
-- **Use E.164 format** (e.g., `+19788768888`) in a single `phoneNumber` field to eliminate the need for separate countryCode.
-- **Update validation logic** to assume a default country only if acceptable (e.g., U.S. business assuming +1).
-- **Document the change thoroughly**, and ensure all consumers and downstream systems are aligned.
-- **Monitor usage and errors** after deployment using logs, metrics, and customer feedback.
+## 🐳 GKE (Google Kubernetes Engine)
+
+{expand\:title=Environment Variables}
+|| Source || Use ||
+\| ConfigMap | Non-sensitive values (BASE\_URL, ENV) |
+\| Secret | Sensitive data (passwords, API keys) |
+{expand}
+
+{expand\:title=Secrets}
+
+* Use **Kubernetes Secrets** or **Google Secret Manager**
+* Recommended: Use **Workload Identity** to access GCP secrets securely
+* Optionally sync with controller for auto updates
+  {expand}
+
+{expand\:title=Service Accounts & IAM}
+
+* Use **Workload Identity** to link K8s SA ↔ GCP SA
+* GCP IAM grants access to Cloud APIs
+* K8s RBAC for namespace-level restrictions
+  {expand}
 
 ---
 
-Would you like a sample data migration script or schema transformation strategy to handle this change smoothly?
+## 🔐 Security & Identity Matrix
+
+|| Platform || Identity Mechanism || Secret Storage || Least Privilege Strategy ||
+\| AKS | Pod Identity / Workload Identity | Azure Key Vault | Use AD roles with minimal access |
+\| Azure Functions | Managed Identity | Azure Key Vault | Resource-level RBAC |
+\| Cloud Run | GCP Service Account | Secret Manager | Per-service IAM roles |
+\| GKE | Workload Identity | Secret Manager / K8s Secret | GCP IAM + K8s RBAC |
+
+---
+
+Would you like me to export this to a `.txt` file for upload or generate an attachment version you can directly import into Confluence via the storage format?
