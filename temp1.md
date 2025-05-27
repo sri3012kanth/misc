@@ -1,94 +1,126 @@
-Here is the same **application-level documentation** using **Confluence wiki markup format**, including collapsible sections (using `{expand}`), and tables to capture environment variables, secrets, service accounts, and notes for each app.
+# 📘 Application Configuration Documentation
+
+This documentation captures configuration values used by individual applications across environments. Each section details environment variables, secrets, service accounts, and operational notes.
 
 ---
 
-# 📘 Application Configuration Documentation (Confluence Format)
+## 🔹 customer-service
 
-This page documents per-application configuration values across environments. It includes environment variables, secrets, service identities, and key operational notes.
+<details>
+<summary>🔧 Environment Variables</summary>
+
+| Key         | Value/Example              | Description               | Source                    |
+|-------------|----------------------------|---------------------------|---------------------------|
+| ENV         | prod                       | Runtime environment       | ConfigMap / App Settings  |
+| DB_URL      | jdbc:sqlserver://...       | Database connection string| ConfigMap / App Settings  |
+| API_TIMEOUT | 5000                       | Timeout in milliseconds   | ConfigMap                 |
+
+</details>
+
+<details>
+<summary>🔐 Secrets</summary>
+
+| Secret Key   | Usage             | Source            | Notes                                |
+|--------------|------------------|-------------------|--------------------------------------|
+| DB_PASSWORD  | DB Authentication| Azure Key Vault   | Referenced via CSI or App Settings   |
+| JWT_SECRET   | Token Signing    | Secret Manager    | Injected as env var or volume        |
+
+</details>
+
+<details>
+<summary>🛡️ Service Account / Identity</summary>
+
+| Platform  | Service Account Name                              | Permissions                          |
+|-----------|---------------------------------------------------|--------------------------------------|
+| AKS       | sa-customer-svc                                   | Reader for Key Vault, DB             |
+| Cloud Run | customer-svc@project.iam.gserviceaccount.com      | Pub/Sub, SecretManager Access        |
+
+</details>
+
+<details>
+<summary>📝 Notes</summary>
+
+- Ensure `JWT_SECRET` is rotated every 90 days  
+- Requires access to `customer-profile` topic in Pub/Sub  
+- Fails fast if `DB_URL` is incorrect  
+
+</details>
 
 ---
 
-## 🔹 **customer-service**
+## 🔹 order-service
 
-{expand\:title=🔧 Environment Variables}
-|| Key || Value/Example || Description || Source ||
-\| ENV | prod | Runtime environment | ConfigMap / App Settings |
-\| DB\_URL | jdbc\:sqlserver://... | Database connection string | ConfigMap / App Settings |
-\| API\_TIMEOUT | 5000 | Timeout in milliseconds | ConfigMap |
-{expand}
+<details>
+<summary>🔧 Environment Variables</summary>
 
-{expand\:title=🔐 Secrets}
-|| Secret Key || Usage || Source || Notes ||
-\| DB\_PASSWORD | DB Authentication | Azure Key Vault | Referenced via CSI or App Settings |
-\| JWT\_SECRET | Token Signing | Secret Manager | Injected as env var or volume |
-{expand}
+| Key          | Value/Example  | Description          | Source               |
+|--------------|----------------|----------------------|----------------------|
+| ENV          | staging        | Runtime environment  | ConfigMap / YAML     |
+| ORDER_QUEUE  | orders-topic   | Pub/Sub topic name   | App Setting          |
 
-{expand\:title=🛡️ Service Account / Identity}
-|| Platform || Service Account Name || Permissions ||
-\| AKS | sa-customer-svc | Reader for Key Vault, DB |
-\| Cloud Run | [customer-svc@project.iam.gserviceaccount.com](mailto:customer-svc@project.iam.gserviceaccount.com) | Pub/Sub, SecretManager Access |
-{expand}
+</details>
 
-{expand\:title=📝 Notes}
+<details>
+<summary>🔐 Secrets</summary>
 
-* Ensure `JWT_SECRET` is rotated every 90 days
-* Requires access to `customer-profile` topic in Pub/Sub
-* Fails fast if `DB_URL` is incorrect
-  {expand}
+| Secret Key   | Usage         | Source         | Notes                        |
+|--------------|---------------|----------------|------------------------------|
+| QUEUE_TOKEN  | Pub/Sub auth  | Secret Manager | Least-privilege access       |
 
----
+</details>
 
-## 🔹 **order-service**
+<details>
+<summary>🛡️ Service Account / Identity</summary>
 
-{expand\:title=🔧 Environment Variables}
-|| Key || Value/Example || Description || Source ||
-\| ENV | staging | Runtime environment | ConfigMap / YAML |
-\| ORDER\_QUEUE | orders-topic | Pub/Sub topic name | App Setting |
-{expand}
+| Platform  | Service Account Name                             | Permissions           |
+|-----------|--------------------------------------------------|------------------------|
+| Cloud Run | order-svc@project.iam.gserviceaccount.com        | Pub/Sub Publisher      |
 
-{expand\:title=🔐 Secrets}
-|| Secret Key || Usage || Source || Notes ||
-\| QUEUE\_TOKEN | Pub/Sub auth | Secret Manager | Least-privilege access |
-{expand}
+</details>
 
-{expand\:title=🛡️ Service Account / Identity}
-|| Platform || Service Account Name || Permissions ||
-\| Cloud Run | [order-svc@project.iam.gserviceaccount.com](mailto:order-svc@project.iam.gserviceaccount.com) | Pub/Sub Publisher |
-{expand}
+<details>
+<summary>📝 Notes</summary>
 
-{expand\:title=📝 Notes}
+- Requires topic `orders-topic` to exist  
+- Use dead-letter topic config for error handling  
+- Rotate `QUEUE_TOKEN` every 30 days  
 
-* Requires topic `orders-topic` to exist
-* Use dead-letter topic config for error handling
-* Rotate `QUEUE_TOKEN` every 30 days
-  {expand}
+</details>
 
 ---
 
 ## 🧩 Template for New App
 
-Copy this block when adding a new application.
+<details>
+<summary>🔧 Environment Variables</summary>
 
-{expand\:title=🔧 Environment Variables}
-|| Key || Value/Example || Description || Source ||
-\| EXAMPLE\_KEY | value | Example description | ConfigMap/App Settings |
-{expand}
+| Key           | Value/Example | Description         | Source                   |
+|---------------|----------------|---------------------|--------------------------|
+| EXAMPLE_KEY   | value          | Example description | ConfigMap / App Settings |
 
-{expand\:title=🔐 Secrets}
-|| Secret Key || Usage || Source || Notes ||
-\| SECRET\_NAME | Description | Key Vault / Secret Manager | Additional info |
-{expand}
+</details>
 
-{expand\:title=🛡️ Service Account / Identity}
-|| Platform || Service Account Name || Permissions ||
-\| Platform Name | service-account-name | Role / access description |
-{expand}
+<details>
+<summary>🔐 Secrets</summary>
 
-{expand\:title=📝 Notes}
+| Secret Key   | Usage        | Source                    | Notes                  |
+|--------------|--------------|---------------------------|------------------------|
+| SECRET_NAME  | Description  | Key Vault / Secret Manager| Additional info        |
 
-* Notes about setup, dependencies, or conditions
-  {expand}
+</details>
 
----
+<details>
+<summary>🛡️ Service Account / Identity</summary>
 
-Would you like a downloadable `.confluence` file or should I prepare this for direct pasting into your Confluence page editor?
+| Platform      | Service Account Name     | Permissions              |
+|---------------|--------------------------|---------------------------|
+| Platform Name | service-account-name     | Role / access description |
+
+</details>
+
+<details>
+<summary>📝 Notes</summary>
+
+- Notes about setup, dependencies, or conditions
+
+</details>
