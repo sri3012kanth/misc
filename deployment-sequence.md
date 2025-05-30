@@ -1,67 +1,105 @@
+# 📦 Project Dependencies & Pre-Requisites
 
-# 📦 Deployment Sequence – Production Environment
-
-This document outlines the production deployment sequence of modules across various platforms to ensure dependency alignment and avoid downtime.
-
----
-
-## 🚀 Overall Deployment Strategy
-
-- Ensure all pipelines pass QA/UAT.
-- Validate external service dependencies.
-- Pause external triggers (if applicable).
-- Deploy in defined order to maintain service integrity.
+This document outlines the key dependencies and required services for successful deployment of the application stack across environments (AKS, GKE, Azure Functions, Google Cloud Run).
 
 ---
 
-## 🧭 Deployment Order
+## 🧱 Prerequisite Summary Table
 
-| Step | Module Name         | Platform              | Description                                 | Notes                                |
-|------|---------------------|------------------------|---------------------------------------------|--------------------------------------|
-| 1    | common-config       | Shared                 | Deploy shared config maps and secrets       | Used by all services                 |
-| 2    | auth-service        | AKS                    | Authentication backend (Java)               | Ensure Key Vault access works        |
-| 3    | customer-service    | GKE                    | Customer profile service                    | Depends on auth-service              |
-| 4    | billing-service     | GKE                    | Handles invoicing and payment processing    | Requires customer-service to be up   |
-| 5    | event-processor-fn  | Azure Functions        | Processes domain events                     | Triggered by Azure Event Grid        |
-| 6    | notifier            | Google Cloud Run       | Sends notifications (email/SMS)             | Consumes Pub/Sub events              |
-| 7    | reporting-fn        | Google Cloud Function  | Generates daily reports                     | Scheduled function                   |
-| 8    | order-service       | AKS                    | Manages order workflows                     | Depends on billing-service           |
-| 9    | api-gateway         | Google Cloud Run       | External API entrypoint                     | Should be last for traffic control   |
+| Dependency Type   | Name / Resource                     | Applies To       | Owner / Team     | Notes                                              |
+|-------------------|--------------------------------------|------------------|------------------|----------------------------------------------------|
+| 🔐 Secret Store    | Azure Key Vault: `my-app-kv`         | All Envs         | Security Team    | Must exist before app deployment                   |
+| 🪪 Identity         | Managed Identity: `app-mi`           | Prod / Staging   | IAM Admins       | Needs access to Key Vault, Storage                 |
+| 📦 External API     | `customer-profile-service`           | All Envs         | Integration Team | Must be reachable over VNet                        |
+| 📊 Database         | CosmosDB: `customer-db`              | Prod             | DBA Team         | Indexed for customerId                             |
+| 🪝 Event Trigger    | Pub/Sub Topic: `order-topic`         | GCP / Cloud Run  | Platform Team    | Required for async order processing                |
 
 ---
 
-## ⚙️ Platform-Specific Notes
+## 🔐 Azure Key Vault: `my-app-kv`
 
-### 🌀 AKS Deployment Notes
+<details>
+<summary>Details</summary>
 
-- Use Helm charts for version consistency.
-- Validate Key Vault integration for secrets.
-- Use readiness probes to avoid traffic on cold starts.
+- **Type**: Azure Key Vault  
+- **Required For**: Storing `DB_PASSWORD`, `JWT_SECRET`  
+- **Access Control**: Managed Identity `app-mi` must have `get` and `list` permissions  
+- **Environment**: All (Dev, Staging, Prod)  
+- **Reference**: Vault URI must be configured in app settings  
 
-### 🟦 Azure Functions Deployment Notes
-
-- Use slots if available (`staging` → `production` swap).
-- Rotate keys post-deploy if secrets are updated.
-- Monitor with Application Insights.
-
-### 🟩 GKE Deployment Notes
-
-- Use rolling updates to avoid downtime.
-- Validate sidecar containers (e.g., Istio, logging).
-- Ensure GCR/GAR access for pulling images.
-
-### 🟨 Google Cloud Run Deployment Notes
-
-- Set concurrency limits to avoid overload.
-- Configure IAM for service-to-service auth.
-- Ensure Pub/Sub trigger permissions are in place.
+</details>
 
 ---
 
-## ✅ Post-Deployment Checklist
+## 📦 Dependency: `customer-profile-service`
 
-- [ ] Verify service health across all modules.
-- [ ] Re-enable external triggers or schedulers.
-- [ ] Rotate secrets if changes were made.
-- [ ] Tag the deployment version in Git (or artifact repository).
-- [ ] Communicate deployment completion to stakeholders.
+<details>
+<summary>Details</summary>
+
+- **Interface**: REST (v1)  
+- **Base URL**: `https://profile.internal/api/v1`  
+- **Auth**: Internal token (shared secret)  
+- **Availability**: Must be reachable in all environments  
+- **Owner**: Integration Team  
+
+</details>
+
+---
+
+## 🪪 Managed Identity: `app-mi`
+
+<details>
+<summary>Details</summary>
+
+- **Purpose**: Used to access Azure Key Vault and Cosmos DB  
+- **Environment**: Staging, Prod  
+- **Permissions Required**:  
+  - Key Vault: `get`, `list`  
+  - Cosmos DB: read/write access  
+
+</details>
+
+---
+
+## 📊 Cosmos DB: `customer-db`
+
+<details>
+<summary>Details</summary>
+
+- **Type**: Azure Cosmos DB for MongoDB API  
+- **Environment**: Production  
+- **Key Usage**: Customer profile storage  
+- **Indexes**: Must include `customerId`, `email` for performance  
+- **Owner**: DBA Team  
+
+</details>
+
+---
+
+## 🪝 Pub/Sub Topic: `order-topic`
+
+<details>
+<summary>Details</summary>
+
+- **Platform**: Google Cloud Pub/Sub  
+- **Used By**: Order service running in Cloud Run  
+- **Access**: Publisher rights for `order-service@project.iam.gserviceaccount.com`  
+- **Environment**: All  
+- **Notes**: Configure dead-letter topic and retry policy  
+
+</details>
+
+---
+
+## 🚦 Pre-deployment Checklist
+
+| Item                         | Status       | Verified By |
+|------------------------------|--------------|--------------|
+| Key Vault Exists             | ✅ Complete  | DevOps       |
+| Managed Identity Assigned    | 🕒 In Progress | Security     |
+| External App Reachable       | ⏳ Pending   | Network      |
+| Secret Reference Validated   | ✅ Complete  | Developer    |
+
+---
+
+> ℹ️ This document should be reviewed before each major deployment. Use pull requests to update dependency records as needed.
