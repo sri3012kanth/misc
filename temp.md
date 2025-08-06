@@ -1,133 +1,73 @@
-Here's a detailed **feature comparison between Azure Cosmos DB for MongoDB RU-based (Request Units) vs vCore-based** models, across the categories you've specified—especially with Spring Data MongoDB and operational concerns in mind:
+Here’s a **Python script** to copy the **Data Encryption Key (DEK)** from **Cosmos DB MongoDB RU-based API** to **MongoDB vCore API**, assuming both store their DEKs in the `encryption.__keyVault` collection.
 
 ---
 
-### 🔍 **1. Workload Fit - Querying Impact (Spring Boot Data MongoDB)**
+## ✅ Requirements
 
-| Feature                     | **RU-Based**                                          | **vCore-Based**                                          |
-| --------------------------- | ----------------------------------------------------- | -------------------------------------------------------- |
-| Spring Data MongoDB Support | ✅ Fully supported                                     | ✅ Fully supported                                        |
-| Query Performance for OLTP  | ✅ Optimized for low-latency OLTP with dynamic scaling | ⚠️ More suited for batch/analytical read-heavy workloads |
-| Query Latency               | Very low, sub-10ms for indexed queries                | Higher than RU-based, especially under load              |
-| Connection Pooling          | Cosmos SDK optimized                                  | MongoDB native driver supported                          |
+Install dependencies:
 
-**Verdict**: RU-based is better for transactional Spring Boot workloads.
+```bash
+pip install pymongo dnspython
+```
 
 ---
 
-### 🌍 **2. Data Replication**
+## 🐍 Python Script
 
-| Feature             | **RU-Based**                       | **vCore-Based**                                           |
-| ------------------- | ---------------------------------- | --------------------------------------------------------- |
-| Global Distribution | ✅ Native multi-region replication  | ❌ Currently single-region only (as of latest public info) |
-| Region Failover     | ✅ Automatic failover               | ❌ Manual workaround required                              |
-| Read Replicas       | ✅ Automatic with regional replicas | ✅ MongoDB read replicas (manual config)                   |
+```python
+from pymongo import MongoClient
+from bson import json_util
+import json
 
----
+# 🔐 Connection URIs
+RU_URI = "mongodb://<username>:<password>@<ru-account>.mongo.cosmos.azure.com:10255/?ssl=true&retrywrites=false"
+VCORE_URI = "mongodb://<username>:<password>@<vcore-server>.mongo.cosmos.azure.com:10255/?ssl=true&retrywrites=false"
 
-### 📏 **3. Consistency Levels**
+# Constants
+KEY_VAULT_DB = "encryption"
+KEY_VAULT_COLL = "__keyVault"
+KEY_ALT_NAME = "your-key-alias"  # 🔁 Update with your DEK alias or use _id
 
-| Feature             | **RU-Based**                                                                  | **vCore-Based**                                                 |
-| ------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Consistency Options | ✅ 5 options (Strong, Bounded Staleness, Session, Consistent Prefix, Eventual) | ❌ Only eventual/primary-secondary consistency (MongoDB default) |
-| Tunable Per-Request | ✅ Yes                                                                         | ❌ No                                                            |
+# Step 1: Connect to RU-based Cosmos DB and read DEK
+ru_client = MongoClient(RU_URI)
+ru_key_vault = ru_client[KEY_VAULT_DB][KEY_VAULT_COLL]
 
----
+dek_doc = ru_key_vault.find_one({"keyAltNames": KEY_ALT_NAME})
 
-### 🔐 **4. Encryption at Rest - Field Level Encryption**
+if not dek_doc:
+    raise Exception(f"DEK with keyAltName '{KEY_ALT_NAME}' not found in RU Cosmos DB")
 
-| Feature                | **RU-Based**         | **vCore-Based**                              |
-| ---------------------- | -------------------- | -------------------------------------------- |
-| Encryption at Rest     | ✅ Enabled by default | ✅ Enabled by default                         |
-| Field-Level Encryption | ❌ Not supported      | ✅ Supported via MongoDB 6+ FLE (client-side) |
+print(f"[✅] DEK document found in RU Cosmos DB: {dek_doc['_id']}")
 
----
+# Step 2: Connect to vCore Cosmos DB and insert DEK
+vcore_client = MongoClient(VCORE_URI)
+vcore_key_vault = vcore_client[KEY_VAULT_DB][KEY_VAULT_COLL]
 
-### 🔐 **5. Access Granularity - Account / DB Level**
+existing = vcore_key_vault.find_one({"_id": dek_doc["_id"]})
+if existing:
+    print("[ℹ️] DEK already exists in vCore. Replacing it.")
+    vcore_key_vault.replace_one({"_id": dek_doc["_id"]}, dek_doc)
+else:
+    print("[➕] Inserting DEK into vCore Cosmos DB.")
+    vcore_key_vault.insert_one(dek_doc)
 
-| Feature          | **RU-Based**                       | **vCore-Based**             |
-| ---------------- | ---------------------------------- | --------------------------- |
-| Account Level    | ✅ Role-based access control (RBAC) | ✅ RBAC                      |
-| Database Level   | ✅ With Role Assignments            | ✅ MongoDB user roles per DB |
-| Collection Level | ✅ With custom roles                | ✅ Native MongoDB roles      |
+print("[🎉] DEK successfully copied from RU to vCore.")
 
----
+# Optional: Export to JSON (for inspection or backup)
+with open("dek_backup.json", "w") as f:
+    f.write(json_util.dumps(dek_doc, indent=2))
 
-### 🔁 **6. Change Data Feed Support (Pull vs Push)**
-
-| Feature                         | **RU-Based**                        | **vCore-Based**                 |
-| ------------------------------- | ----------------------------------- | ------------------------------- |
-| Change Stream (CDC)             | ✅ Supported (via MongoDB API v4.0+) | ✅ Native MongoDB Change Streams |
-| Pull (e.g., Spring listener)    | ✅ Supported                         | ✅ Supported                     |
-| Push (e.g., Event Grid trigger) | ✅ Event Grid integration            | ❌ Not available                 |
-
----
-
-### ⚡ **7. Read Query Performance**
-
-| Feature  | **RU-Based**                 | **vCore-Based**                               |
-| -------- | ---------------------------- | --------------------------------------------- |
-| Latency  | ✅ Sub-10ms for indexed reads | ⚠️ Depends on VM size; slower under high load |
-| Indexing | ✅ Automatic and tunable      | ✅ Manual index creation required              |
+print("[📁] Backup saved to dek_backup.json")
+```
 
 ---
 
-### ✍️ **8. Write Query Performance**
+## 📝 Notes
 
-| Feature       | **RU-Based**                    | **vCore-Based**                               |
-| ------------- | ------------------------------- | --------------------------------------------- |
-| Write Latency | ✅ Low latency, high concurrency | ⚠️ Higher latency under write-heavy load      |
-| Write Scaling | ✅ Auto-scale RUs                | ⚠️ Requires vCore or storage scaling manually |
-
----
-
-### 🌐 **9. Multi-Regional Writes**
-
-| Feature             | **RU-Based**                          | **vCore-Based**              |
-| ------------------- | ------------------------------------- | ---------------------------- |
-| Multi-Write Support | ✅ Yes (via multi-region write config) | ❌ No (single-region primary) |
-| Conflict Resolution | ✅ Custom policies supported           | ❌ Not applicable             |
+* You can also fetch by `_id` instead of `keyAltNames` if you prefer.
+* `json_util.dumps` handles binary fields (`keyMaterial`) correctly for BSON.
+* Make sure your app on vCore can still access the Azure Key Vault (KEK) to decrypt data using this DEK.
 
 ---
 
-### 🔌 **10. Protocol Support**
-
-| Feature               | **RU-Based**                        | **vCore-Based**         |
-| --------------------- | ----------------------------------- | ----------------------- |
-| MongoDB Wire Protocol | ✅ Compatible up to 4.2 (as of 2024) | ✅ Supports MongoDB 6.0+ |
-| TLS Support           | ✅ Yes                               | ✅ Yes                   |
-
----
-
-### 🔎 **11. Query Support**
-
-| Feature         | **RU-Based**                            | **vCore-Based**                         |
-| --------------- | --------------------------------------- | --------------------------------------- |
-| Aggregations    | ⚠️ Limited aggregation pipeline support | ✅ Full aggregation support              |
-| Joins           | ❌ Not supported                         | ✅ Via `$lookup` in aggregation          |
-| Transactions    | ✅ Limited to single-partition           | ✅ Full ACID multi-document transactions |
-| `$regex`, `$in` | ✅ Supported with indexing               | ✅ Supported                             |
-
----
-
-### 📚 **12. Indexes Support**
-
-| Feature            | **RU-Based**                       | **vCore-Based**              |
-| ------------------ | ---------------------------------- | ---------------------------- |
-| Automatic Indexing | ✅ Enabled by default               | ❌ Manual indexing            |
-| Custom Indexes     | ✅ Supported (though limited types) | ✅ Full MongoDB index support |
-| TTL Indexes        | ✅ Supported                        | ✅ Supported                  |
-| Geospatial Indexes | ✅ Supported                        | ✅ Supported                  |
-
----
-
-### ✅ **Summary Recommendation Based on Use Case**
-
-| Use Case                                                              | Recommendation    |
-| --------------------------------------------------------------------- | ----------------- |
-| Spring Boot OLTP apps with real-time reads/writes and multi-region    | ✅ **RU-Based**    |
-| Analytical queries, large batch processing, advanced MongoDB features | ✅ **vCore-Based** |
-| Need for multi-region availability or push-based event triggers       | ✅ **RU-Based**    |
-| Need for field-level encryption or `$lookup` joins                    | ✅ **vCore-Based** |
-
-Would you like this comparison as a downloadable table or slide?
+Would you like a version of this that pulls the DEK from Azure Key Vault directly as well, or regenerates the DEK and re-wraps it with a new KEK?
