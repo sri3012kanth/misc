@@ -1,129 +1,88 @@
-Here is your **Atlassian Confluence preview-friendly text** using **Confluence wiki markup-style formatting**, which renders properly when pasted into a Confluence page editor that supports rich text or the legacy wiki renderer:
+Perfect! You want a **nested YAML structure** showing `databases → collections → indexes` with `keys` as a list of `[field, direction]` and `options` as a dict. Here’s a **Python script** that exports Cosmos DB (Mongo API) indexes in exactly that format:
 
 ---
 
-# 🔁 Platform Configuration Mapping
+```python
+from pymongo import MongoClient
+import yaml
+
+# === Config ===
+COSMOS_URI = "mongodb://<username>:<password>@<cosmos-account>.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb"
+DATABASES = ["myappdb", "analyticsdb"]  # List your databases here
+
+client = MongoClient(COSMOS_URI)
+
+output = {"databases": {}}
+
+for db_name in DATABASES:
+    db = client[db_name]
+    output["databases"][db_name] = {"collections": {}}
+    
+    # List collections
+    for coll_name in db.list_collection_names():
+        collection = db[coll_name]
+        indexes = collection.list_indexes()
+        index_list = []
+        
+        for idx in indexes:
+            # Convert keys dict to list of [field, direction]
+            keys = [[k, v] for k, v in idx["key"].items()]
+            
+            # Build options dict
+            options = {}
+            if idx.get("unique"):
+                options["unique"] = True
+            if idx.get("sparse"):
+                options["sparse"] = True
+            if idx.get("expireAfterSeconds") is not None:
+                options["expireAfterSeconds"] = idx["expireAfterSeconds"]
+            if idx.get("partialFilterExpression") is not None:
+                options["partialFilterExpression"] = idx["partialFilterExpression"]
+            
+            index_list.append({
+                "keys": keys,
+                "options": options
+            })
+        
+        output["databases"][db_name]["collections"][coll_name] = {"indexes": index_list}
+
+# Export to YAML
+with open("cosmos_indexes.yaml", "w") as f:
+    yaml.dump(output, f, default_flow_style=False, sort_keys=False)
+
+print("Indexes exported to cosmos_indexes.yaml")
+```
 
 ---
 
-## 🔧 General Mapping Table
+### ✅ Sample Output (`cosmos_indexes.yaml`)
 
-|| Config Type || AKS || Azure Functions || Cloud Run || GKE ||
-\| Environment Variables | ConfigMap / Helm | App Settings | `gcloud` CLI / YAML | ConfigMap / Helm |
-\| Secrets | Azure Key Vault + CSI Driver | Azure Key Vault via App Settings | Google Secret Manager | GCP Secret Manager / Kubernetes Secrets |
-\| Trigger Mechanism | K8s Eventing / Custom Controller | HTTP / Timer / Event Grid | Pub/Sub / Eventarc | Pub/Sub / Cloud Run |
-\| Identity & Access | Pod Identity / Workload Identity | Managed Identity | Service Account | Workload Identity |
-
----
-
-## 🟦 Azure AKS
-
-{expand\:title=Environment Variables}
-|| Source || Use || Tool ||
-\| ConfigMap | Non-sensitive config | kubectl / Helm |
-\| Secret | Sensitive values | K8s Secret / CSI driver |
-{expand}
-
-{expand\:title=Secrets}
-
-* Use *Azure Key Vault* to store sensitive information
-* Integrate via *Secrets Store CSI Driver*
-* Access using *Pod Identity* or *Workload Identity*
-  {expand}
-
-{expand\:title=Service Accounts & IAM}
-
-* Map Kubernetes ServiceAccounts to Azure AD
-* Use RBAC for vault, storage, etc.
-* Grant least privilege to resources via RBAC roles
-  {expand}
+```yaml
+databases:
+  myappdb:
+    collections:
+      users:
+        indexes:
+          - keys: [ ["_id", 1] ]
+            options: {}
+          - keys: [ ["email", 1] ]
+            options: { unique: true }
+      orders:
+        indexes:
+          - keys: [ ["orderId", 1] ]
+            options: { unique: true }
+          - keys: [ ["userId", 1], ["status", 1] ]
+            options: {}
+  analyticsdb:
+    collections:
+      events:
+        indexes:
+          - keys: [ ["timestamp", -1] ]
+            options: {}
+```
 
 ---
 
-## ⚡ Azure Functions
+This script handles **all indexes, including compound indexes**, and correctly maps options like `unique`, `sparse`, `expireAfterSeconds`, and `partialFilterExpression`.
 
-{expand\:title=Environment Variables}
-|| Setting || Value || Source ||
-\| DB\_URL | `jdbc:sqlserver://...` | App Settings |
-\| SECRET\_KEY | `@Microsoft.KeyVault(...)` | Key Vault Reference |
-{expand}
-
-{expand\:title=Secrets}
-
-* Secrets stored in *Azure Key Vault*
-* Use *Key Vault Reference Syntax* inside App Settings
-* Authenticate using *System/User-assigned Managed Identity*
-  {expand}
-
-{expand\:title=Service Identity}
-
-* Use *Managed Identity* to access Key Vault, Storage, etc.
-* Permissions assigned at resource or group level
-  {expand}
-
----
-
-## ☁️ Google Cloud Run (Pub/Sub Trigger)
-
-{expand\:title=Environment Variables}
-|| Name || Value || Set Method ||
-\| ENV | prod | `gcloud run deploy --set-env-vars` |
-\| SECRET\_KEY | Pulled from Secret Manager | Env or Volume |
-{expand}
-
-{expand\:title=Secrets}
-
-* Use *Google Secret Manager*
-* Inject secrets as env variables or mounted volume
-* Grant `roles/secretmanager.secretAccessor` to service account
-  {expand}
-
-{expand\:title=Pub/Sub Trigger}
-
-* Trigger via *Eventarc* or direct *Pub/Sub subscription*
-* Grant required permissions: `pubsub.subscriber`, `run.invoker`
-  {expand}
-
-{expand\:title=Service Accounts}
-
-* Each Cloud Run service uses its own *GCP Service Account*
-* Authenticate with Pub/Sub, Secret Manager, Cloud Logging, etc.
-  {expand}
-
----
-
-## 🐳 GKE (Google Kubernetes Engine)
-
-{expand\:title=Environment Variables}
-|| Source || Use ||
-\| ConfigMap | Non-sensitive values (BASE\_URL, ENV) |
-\| Secret | Sensitive data (passwords, API keys) |
-{expand}
-
-{expand\:title=Secrets}
-
-* Use *Kubernetes Secrets* or *Google Secret Manager*
-* Recommended: Use *Workload Identity* to access GCP secrets securely
-* Optionally sync with controller for auto updates
-  {expand}
-
-{expand\:title=Service Accounts & IAM}
-
-* Use *Workload Identity* to link K8s SA ↔ GCP SA
-* GCP IAM grants access to Cloud APIs
-* K8s RBAC for namespace-level restrictions
-  {expand}
-
----
-
-## 🔐 Security & Identity Matrix
-
-|| Platform || Identity Mechanism || Secret Storage || Least Privilege Strategy ||
-\| AKS | Pod Identity / Workload Identity | Azure Key Vault | Use AD roles with minimal access |
-\| Azure Functions | Managed Identity | Azure Key Vault | Resource-level RBAC |
-\| Cloud Run | GCP Service Account | Secret Manager | Per-service IAM roles |
-\| GKE | Workload Identity | Secret Manager / K8s Secret | GCP IAM + K8s RBAC |
-
----
-
-Would you like a version tailored for **team-specific app configurations** with collapsible regions per application?
+If you want, I can also **make it auto-detect all databases** in your Cosmos account instead of manually listing `DATABASES`. Do you want me to do that?
