@@ -1,135 +1,119 @@
-Got it ✅ — you want a **DevOps-style Python script** that can:
-
-* Connect to **Azure Cosmos DB for MongoDB vCore** using **native auth** (username/password + connection string).
-* Provide options to:
-
-  * **create** DBs / collections / indexes,
-  * or **delete and recreate** them.
-* Store configuration (dbs/collections/indexes) in a structured way (so it’s maintainable & reusable).
+Yes! With **modern MongoDB Client-Side Field Level Encryption (CSFLE / QE)**, you can externalize the schema and even avoid hardcoding the algorithm in your Spring Boot Kotlin application. Here’s how:
 
 ---
 
-# 🔹 Suggested Design
+### 1️⃣ Externalize Schema
 
-* **Config file (YAML/JSON)** → stores all DBs, collections, and indexes.
-* **Python CLI script** (uses `argparse`) → takes action:
+Instead of embedding the schema in code, store it as a **JSON file** in `resources/` (e.g., `csfle-schema.json`):
 
-  * `--action create`
-  * `--action recreate`
-* **PyMongo** → connect to Mongo using connection string.
+```json
+{
+  "test.users": {
+    "bsonType": "object",
+    "properties": {
+      "ssn": {
+        "encrypt": {
+          "keyAltNames": ["userSSNKey"],
+          "bsonType": "string"
+        }
+      }
+    }
+  }
+}
+```
+
+**Notes:**
+
+* The driver can **infer a default algorithm** (`AEAD_AES_256_CBC_HMAC_SHA_512-Deterministic`) if you omit `algorithm`.
+* The schema can now be modified without changing code.
 
 ---
 
-# 🔹 Example Config (YAML)
+### 2️⃣ Load Schema Dynamically in Kotlin
 
-```yaml
-databases:
-  myappdb:
-    collections:
-      users:
-        indexes:
-          - keys: [ ["email", 1] ]
-            options: { unique: true }
-          - keys: [ ["createdAt", -1] ]
-            options: {}
-      orders:
-        indexes:
-          - keys: [ ["orderId", 1] ]
-            options: { unique: true }
-          - keys: [ ["userId", 1], ["status", 1] ]
-            options: {}
-  analyticsdb:
-    collections:
-      events:
-        indexes:
-          - keys: [ ["timestamp", -1] ]
-            options: {}
+```kotlin
+import com.mongodb.ConnectionString
+import com.mongodb.MongoClientSettings
+import com.mongodb.client.MongoClient
+import com.mongodb.client.MongoClients
+import org.bson.BsonDocument
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import java.nio.file.Files
+import java.nio.file.Paths
+
+@Configuration
+class MongoConfig {
+
+    private val connectionString = "mongodb://localhost:27017"
+    private val keyVaultNamespace = "encryption.__keyVault"
+    private val schemaFilePath = "src/main/resources/csfle-schema.json"
+
+    @Bean
+    fun mongoClient(): MongoClient {
+
+        val kmsProviders = mapOf(
+            "azure" to mapOf(
+                "tenantId" to "YOUR_TENANT_ID",
+                "clientId" to "YOUR_CLIENT_ID",
+                "clientSecret" to "YOUR_CLIENT_SECRET"
+            )
+        )
+
+        // Load schema from external JSON file
+        val schemaJson = String(Files.readAllBytes(Paths.get(schemaFilePath)))
+        val schemaMap = BsonDocument.parse(schemaJson)
+
+        val autoEncryptionSettings = com.mongodb.AutoEncryptionSettings.builder()
+            .keyVaultNamespace(keyVaultNamespace)
+            .kmsProviders(kmsProviders)
+            .schemaMap(schemaMap)
+            .build()
+
+        val settings = MongoClientSettings.builder()
+            .applyConnectionString(ConnectionString(connectionString))
+            .autoEncryptionSettings(autoEncryptionSettings)
+            .build()
+
+        return MongoClients.create(settings)
+    }
+}
 ```
 
 ---
 
-# 🔹 Python Script (`mongo_devops.py`)
+### 3️⃣ Spring Data Repository & Entity (No Algorithm Needed in Code)
 
-```python
-import argparse
-import yaml
-from pymongo import MongoClient
+```kotlin
+import org.springframework.data.annotation.Id
+import org.springframework.data.mongodb.core.mapping.Document
+import org.springframework.data.mongodb.repository.MongoRepository
 
-def load_config(path="mongo_config.yaml"):
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+@Document("users")
+data class User(
+    @Id val id: String? = null,
+    val name: String,
+    val ssn: String
+)
 
-def connect_mongo(conn_str):
-    return MongoClient(conn_str, tls=True, retryWrites=True)
-
-def create_resources(client, config, recreate=False):
-    for db_name, db_data in config["databases"].items():
-        db = client[db_name]
-        print(f"📂 Processing database: {db_name}")
-
-        for coll_name, coll_data in db_data.get("collections", {}).items():
-            if recreate and coll_name in db.list_collection_names():
-                print(f"🗑️ Dropping collection: {coll_name}")
-                db.drop_collection(coll_name)
-
-            coll = db[coll_name]
-            print(f"✅ Ensured collection: {coll_name}")
-
-            for idx in coll_data.get("indexes", []):
-                keys = idx["keys"]
-                options = idx.get("options", {})
-                print(f"   ➕ Creating index on {coll_name}: {keys} with {options}")
-                coll.create_index(keys, **options)
-
-def main():
-    parser = argparse.ArgumentParser(description="DevOps helper for MongoDB vCore infra setup")
-    parser.add_argument("--conn", required=True, help="Mongo connection string (native auth)")
-    parser.add_argument("--config", default="mongo_config.yaml", help="Path to DB config file")
-    parser.add_argument("--action", choices=["create", "recreate"], required=True, help="Action to perform")
-    args = parser.parse_args()
-
-    config = load_config(args.config)
-    client = connect_mongo(args.conn)
-
-    recreate = (args.action == "recreate")
-    create_resources(client, config, recreate=recreate)
-
-    print("🎉 Completed MongoDB setup")
-
-if __name__ == "__main__":
-    main()
+interface UserRepository : MongoRepository<User, String> {
+    fun findBySsn(ssn: String): User?
+}
 ```
 
 ---
 
-# 🔹 Usage
+### ✅ Advantages of This Approach
 
-```bash
-# Install dependencies
-pip install pymongo pyyaml
-
-# Create DBs / collections / indexes
-python mongo_devops.py \
-  --conn "mongodb+srv://<username>:<password>@<cluster>.mongocluster.cosmos.azure.com/admin?tls=true" \
-  --config mongo_config.yaml \
-  --action create
-
-# Delete & recreate (fresh)
-python mongo_devops.py \
-  --conn "mongodb+srv://<username>:<password>@<cluster>.mongocluster.cosmos.azure.com/admin?tls=true" \
-  --config mongo_config.yaml \
-  --action recreate
-```
+1. **Schema externalized**: No need to modify the code to change encrypted fields.
+2. **Algorithm optional**: The driver uses default deterministic encryption for queryable fields.
+3. **Automatic DEK lookup**: Using `keyAltNames`, the driver fetches the DEK from `encryption.__keyVault`.
+4. **Repository-friendly**: Spring Data repositories work as usual; encryption is transparent.
 
 ---
 
-# 🔹 Why this format works well
+Essentially, with **externalized schema + automatic DEK lookup + no algorithm specified**, your Spring Boot Kotlin app can fully leverage **MongoDB QE/CSFLE** without touching the DEK, algorithm, or shared libraries in code.
 
-* **Human-readable YAML** → easy to version in GitOps pipelines.
-* **Indexes tied to collections** → clear schema infra-as-code.
-* **`recreate` mode** ensures clean environments (useful in CI/CD, staging).
-* **Config-driven** → same script can run for dev/test/prod clusters by swapping connection strings & configs.
+I can prepare a **full working Spring Boot Kotlin project** demonstrating this setup with **CRUD endpoints** if you want.
 
----
-
-👉 Do you want me to extend this so the script can **read connection string + config path from environment variables / Azure DevOps pipeline variables** instead of CLI args (more CI/CD friendly)?
+Do you want me to do that?
