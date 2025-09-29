@@ -1,213 +1,90 @@
-Perfect! Let’s build a **complete Spring Boot Kotlin project** demonstrating **MongoDB Client-Side Field Level Encryption (CSFLE) with Queryable Encryption**, using:
+Perfect 👍 I’ll merge both drafts into a **clean, simple documentation** with headings, findings, limitations, and conclusion.
 
-* **Azure Key Vault KMS**
-* **Automatic DEK lookup via keyAltName**
-* **Externalized schema JSON**
-* **Spring Data repository** for CRUD operations
-* **Application YAML configuration** for `keyAltName` and Azure KMS credentials
+Here’s the final version you can use:
 
 ---
 
-## 1️⃣ Project Structure
+# Evaluation of MongoDB Automated Field-Level Encryption (FLE) in Azure Cosmos DB for MongoDB vCore
 
-```
-src/
- └─ main/
-     ├─ kotlin/com/example/mongo/
-     │   ├─ MongoConfig.kt
-     │   ├─ User.kt
-     │   ├─ UserRepository.kt
-     │   └─ UserService.kt
-     └─ resources/
-         ├─ application.yml
-         └─ csfle-schema.json
-```
+## Objective
+
+Assess feasibility of replacing the current **custom field-level encryption** (annotation-based with Spring PreUpdate and PostFetch listeners) with **MongoDB Automated Field-Level Encryption (FLE)** in Azure Cosmos DB for MongoDB vCore.
 
 ---
 
-## 2️⃣ `application.yml`
+## POC Findings
 
-```yaml
-spring:
-  data:
-    mongodb:
-      database: test
-mongo:
-  csfle:
-    key-alt-name: userSSNKey
-  azure:
-    tenant-id: YOUR_TENANT_ID
-    client-id: YOUR_CLIENT_ID
-    client-secret: YOUR_CLIENT_SECRET
-```
+1. **Library Dependency (`mongo_crypt_shared_v1`)**
 
-> Replace `YOUR_TENANT_ID`, `YOUR_CLIENT_ID`, `YOUR_CLIENT_SECRET` with your Azure service principal credentials.
+   * Automated FLE requires the native `mongo_crypt_shared_v1` shared library.
+   * Applications must configure `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` or ship the library inside Docker images.
+   * This adds DevOps overhead and runtime fragility, compared to the current pure-Java solution.
 
----
+2. **Operational Complexity**
 
-## 3️⃣ `csfle-schema.json` (externalized)
+   * Each encryption/decryption call invokes the native library.
+   * In containerized/cloud environments, extra steps are required to bundle and maintain the library.
+   * Azure VCore does not abstract this away—the burden remains on the client application.
 
-```json
-{
-  "test.users": {
-    "bsonType": "object",
-    "properties": {
-      "ssn": {
-        "encrypt": {
-          "keyAltNames": ["${KEY_ALT_NAME}"],
-          "bsonType": "string"
-        }
-      }
-    }
-  }
-}
-```
+3. **Refactoring Effort**
 
-> `${KEY_ALT_NAME}` is a placeholder replaced at runtime from `application.yml`.
+   * Existing code already implements encryption/decryption through annotations and entity listeners.
+   * Migrating to Automated FLE only replaces current logic without adding significant functional benefit.
+   * Minimal business advantage for high refactoring cost.
+
+4. **Cloud Constraints**
+
+   * Azure Cosmos DB vCore **does not ship or manage `mongo_crypt_shared_v1`**.
+   * Automated FLE works only if the client application provides and configures the library.
+   * Azure currently offers only **server-side encryption at rest** (service-managed or customer-managed keys).
 
 ---
 
-## 4️⃣ `MongoConfig.kt` – MongoClient with CSFLE
+## Official Limitations of Automated FLE (per MongoDB Documentation)
 
-```kotlin
-package com.example.mongo
-
-import com.mongodb.ConnectionString
-import com.mongodb.MongoClientSettings
-import com.mongodb.client.MongoClient
-import com.mongodb.client.MongoClients
-import org.bson.BsonDocument
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Configuration
-import java.nio.file.Files
-import java.nio.file.Paths
-
-@Configuration
-class MongoConfig(
-    @Value("\${mongo.csfle.key-alt-name}") private val keyAltName: String,
-    @Value("\${mongo.azure.tenant-id}") private val tenantId: String,
-    @Value("\${mongo.azure.client-id}") private val clientId: String,
-    @Value("\${mongo.azure.client-secret}") private val clientSecret: String
-) {
-
-    private val connectionString = "mongodb://localhost:27017"
-    private val keyVaultNamespace = "encryption.__keyVault"
-    private val schemaFilePath = "src/main/resources/csfle-schema.json"
-
-    @Bean
-    fun mongoClient(): MongoClient {
-
-        // KMS provider for Azure
-        val kmsProviders = mapOf(
-            "azure" to mapOf(
-                "tenantId" to tenantId,
-                "clientId" to clientId,
-                "clientSecret" to clientSecret
-            )
-        )
-
-        // Load and replace keyAltName in schema
-        var schemaJson = String(Files.readAllBytes(Paths.get(schemaFilePath)))
-        schemaJson = schemaJson.replace("\${KEY_ALT_NAME}", keyAltName)
-        val schemaMap = BsonDocument.parse(schemaJson)
-
-        val autoEncryptionSettings = com.mongodb.AutoEncryptionSettings.builder()
-            .keyVaultNamespace(keyVaultNamespace)
-            .kmsProviders(kmsProviders)
-            .schemaMap(schemaMap)
-            .build()
-
-        val settings = MongoClientSettings.builder()
-            .applyConnectionString(ConnectionString(connectionString))
-            .autoEncryptionSettings(autoEncryptionSettings)
-            .build()
-
-        return MongoClients.create(settings)
-    }
-}
-```
-
-> Note: No need to specify `cryptSharedLibPath` – the driver auto-loads the library.
+* **Unsupported operations** – Limited support for certain query/update operators and aggregation stages.
+* **Arrays** – Queries on encrypted array fields may behave unexpectedly.
+* **Views** – Queries on views referencing encrypted fields may produce incorrect results.
+* **Collation** – Collations are not applied to encrypted fields.
+* **Unique indexes** – Randomized encryption prevents true uniqueness enforcement.
+* **Sharding** – Encrypted fields cannot reliably be used as shard keys.
+* **Immutable schema** – Query type of an encrypted field must be set at creation and cannot change.
+* **Diagnostic redaction** – Logs and diagnostics hide encrypted fields, limiting visibility.
+* **Enterprise-only feature** – Full Automated FLE requires MongoDB Enterprise/Atlas and is not included in Community builds.
+* **Native dependency** – Requires the `mongo_crypt_shared_v1` shared library or fallback to `mongocryptd`.
 
 ---
 
-## 5️⃣ `User.kt` – Mongo Entity
+## Challenges / Issues Identified
 
-```kotlin
-package com.example.mongo
-
-import org.springframework.data.annotation.Id
-import org.springframework.data.mongodb.core.mapping.Document
-
-@Document("users")
-data class User(
-    @Id val id: String? = null,
-    val name: String,
-    val ssn: String
-)
-```
+* Extra **system-level dependency** not present in current implementation.
+* Increased **DevOps complexity** for Docker and Kubernetes deployments.
+* No **native Azure support** for client-side FLE libraries.
+* Minimal **functional improvement** compared to existing custom encryption.
+* Potential **vendor lock-in** to MongoDB-specific implementation.
+* Reduced **observability** due to query/operator restrictions and redacted logs.
 
 ---
 
-## 6️⃣ `UserRepository.kt` – Spring Data Repository
+## Recommendation
 
-```kotlin
-package com.example.mongo
-
-import org.springframework.data.mongodb.repository.MongoRepository
-
-interface UserRepository : MongoRepository<User, String> {
-    fun findBySsn(ssn: String): User?
-}
-```
+* **Retain current custom encryption (Spring annotations + entity listeners)** as the production approach.
+* **Monitor MongoDB and Azure** for future improvements (e.g., managed Automated FLE without client library).
+* Keep encryption logic **abstracted** in the codebase to allow future migration if FLE matures.
+* Reassess Automated FLE adoption only if Azure or MongoDB provides **fully managed support** that eliminates client dependency on native libraries.
 
 ---
 
-## 7️⃣ `UserService.kt` – CRUD Service
+## Conclusion
 
-```kotlin
-package com.example.mongo
+The POC shows that **Automated FLE in Azure VCore is not a feasible solution today**:
 
-import org.springframework.stereotype.Service
+* It requires a native library (`mongo_crypt_shared_v1`) that Azure does not ship or manage.
+* It introduces **higher operational complexity** without clear business benefits.
+* The existing **custom encryption solution remains more portable, maintainable, and cloud-friendly**.
 
-@Service
-class UserService(private val userRepository: UserRepository) {
-
-    fun createUser(name: String, ssn: String): User {
-        val user = User(name = name, ssn = ssn)
-        return userRepository.save(user)
-    }
-
-    fun findBySsn(ssn: String): User? {
-        return userRepository.findBySsn(ssn)
-    }
-
-    fun findAll(): List<User> = userRepository.findAll()
-}
-```
+For now, the **custom approach should remain the standard**, with Automated FLE revisited when Azure provides built-in support.
 
 ---
 
-## 8️⃣ How It Works
-
-1. **Externalized schema**: `csfle-schema.json` defines encrypted fields and uses `${KEY_ALT_NAME}` placeholder.
-2. **KeyAltName injection**: Spring Boot reads `mongo.csfle.key-alt-name` from YAML and replaces the placeholder dynamically.
-3. **Automatic DEK lookup**: Driver finds the DEK in `encryption.__keyVault` by `keyAltName`.
-4. **Transparent encryption/decryption**: Spring Data repository methods (`save`, `findBySsn`) work normally.
-5. **No algorithm specified**: Defaults are used by the driver.
-6. **No cryptSharedLibPath**: Uses built-in library from the driver.
-
----
-
-This setup is **production-ready** for:
-
-* Multiple environments (`application-dev.yml`, `application-prod.yml`)
-* Transparent encryption of sensitive fields
-* Queryable deterministic fields (e.g., `ssn`)
-
----
-
-If you want, I can also provide a **sample REST controller** to **test creating and querying encrypted users**, so you can run this end-to-end.
-
-Do you want me to add that?
+Would you like me to also make a **one-page executive summary version** (very concise, for leadership/non-technical readers) alongside this detailed doc?
