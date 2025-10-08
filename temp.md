@@ -1,48 +1,98 @@
-Great — here’s a **one-page executive summary** version of the detailed doc you can share with leadership / non-technical stakeholders:
+Perfect — let’s enhance your cleanup script to:
+✅ delete files/folders older than 10 minutes,
+✅ count how many it deleted, and
+✅ log the count + timestamp to a file (so you can confirm it’s running).
 
 ---
 
-# Executive Summary – POC on MongoDB Automated Field-Level Encryption (FLE) in Azure VCore
+## 🧾 Updated Script: `~/cleanup_old_files.sh`
 
-## Purpose
+```bash
+#!/bin/bash
+# ================================
+# Cleanup Script with Logging
+# ================================
 
-We evaluated whether **MongoDB Automated Field-Level Encryption (FLE)** in **Azure Cosmos DB for MongoDB vCore** could replace our existing **custom encryption (Spring annotations + listeners)**.
+# Folder to clean
+TARGET_DIR="/path/to/your/folder"
 
----
+# Log file path
+LOG_FILE="$HOME/cleanup_log.txt"
 
-## Key Findings
+# Current timestamp
+NOW=$(date '+%Y-%m-%d %H:%M:%S')
 
-* **Native dependency** – Automated FLE requires the `mongo_crypt_shared_v1` shared library, which Azure does not provide. Applications must package and manage it themselves.
-* **Operational overhead** – Adds complexity for Docker/Kubernetes builds and cloud deployments.
-* **Minimal benefit** – Migrating would only replace existing custom encryption logic with driver-managed logic, offering no meaningful business advantage.
-* **Azure limitations** – Azure Cosmos DB vCore supports only encryption at rest. Client-side FLE libraries are **not natively supported** today.
-* **MongoDB limitations** – Automated FLE has restrictions (e.g., no uniqueness checks on encrypted fields, limited operators, no shard key support, reduced observability).
+# Find and delete files/folders older than 10 minutes, count them
+COUNT=$(find "$TARGET_DIR" -mindepth 1 -mmin +10 | wc -l)
+find "$TARGET_DIR" -mindepth 1 -mmin +10 -exec rm -rf {} \; 2>/dev/null
 
----
-
-## Issues Identified
-
-* Increases DevOps complexity.
-* Introduces vendor lock-in.
-* Reduces monitoring/diagnostics visibility.
-* Requires code refactoring with little return.
-
----
-
-## Recommendation
-
-* **Continue with current custom encryption** (annotations + listeners).
-* **Do not adopt Automated FLE** in Azure VCore at this stage.
-* **Monitor** Azure/MongoDB roadmap for future managed support (i.e., native FLE without external libraries).
-* Keep our code abstraction flexible so we can re-evaluate when the technology matures.
+# Log output
+echo "[$NOW] Deleted $COUNT items from $TARGET_DIR" >> "$LOG_FILE"
+```
 
 ---
 
-## Conclusion
+### 🧩 What it does
 
-Automated FLE is **not feasible for production in Azure VCore today**.
-Our current **custom encryption remains more portable, maintainable, and easier to operate**.
+* `find "$TARGET_DIR" -mindepth 1 -mmin +10`
+  → Lists all files and subfolders older than 10 minutes.
+* `wc -l`
+  → Counts how many.
+* `rm -rf {}`
+  → Deletes them (quietly, ignoring errors).
+* `echo ... >> "$LOG_FILE"`
+  → Appends a line to the log like:
+
+  ```
+  [2025-10-06 13:45:02] Deleted 7 items from /Users/sri/Downloads/temp
+  ```
 
 ---
 
-Would you like me to also create a **side-by-side comparison table** (Custom vs Automated FLE) for quick presentation slides? That would make the trade-offs even clearer at a glance.
+### 🔧 Setup once
+
+1. Save the script:
+
+   ```bash
+   nano ~/cleanup_old_files.sh
+   ```
+2. Paste the above code.
+3. Make it executable:
+
+   ```bash
+   chmod +x ~/cleanup_old_files.sh
+   ```
+
+---
+
+### 🧭 Optional: Run every 5 minutes via cron
+
+```bash
+crontab -e
+```
+
+Add:
+
+```bash
+*/5 * * * * /Users/yourname/cleanup_old_files.sh >/dev/null 2>&1
+```
+
+---
+
+### ✅ Check log anytime
+
+```bash
+cat ~/cleanup_log.txt
+```
+
+Example output:
+
+```
+[2025-10-06 13:00:01] Deleted 3 items from /Users/sri/Downloads/temp
+[2025-10-06 13:05:01] Deleted 0 items from /Users/sri/Downloads/temp
+[2025-10-06 13:10:01] Deleted 5 items from /Users/sri/Downloads/temp
+```
+
+---
+
+Would you like me to modify it to **keep only the last N log lines** (say last 100 entries) so the file doesn’t grow too large?
