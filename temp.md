@@ -1,4 +1,4 @@
-Here’s the same content rewritten as a **README.md** (developer documentation format) — cleanly structured, Markdown-friendly, and suitable for GitHub, internal repos, or project-level documentation:
+**Here’s the same content rewritten as a **README.md** (developer documentation format) — cleanly structured, Markdown-friendly, and suitable for GitHub, internal repos, or project-level documentation:
 
 ---
 
@@ -258,3 +258,4 @@ logging:
 ---
 
 Would you like me to add a **"Cloud Run-specific tuning"** section next (covering concurrency settings, CPU boost behavior, and min instance recommendations) for inclusion in this README?
+**
