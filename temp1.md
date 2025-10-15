@@ -1,62 +1,58 @@
-Got it — here’s a **focused list of Cloud Run console configuration updates** you can apply directly in the **GCP Cloud Run UI** for **fast readiness detection and optimized cold-start**, without touching your application code:
+Got it! You want a **Python script** that uses **`--` style command-line parameters** instead of positional arguments. Here's an updated version using `argparse`:
 
 ---
 
-## 🛠 Cloud Run Console Settings for Optimized Readiness Probe
+### **Python Script: `create_mongo_user.py`**
 
-| Setting                               | Recommended Value                                | Notes / Purpose                                                           |
-| ------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------- |
-| **Min Instances**                     | `0`                                              | Keep cost minimal; container starts on-demand.                            |
-| **Max Instances**                     | `1`                                              | Only one instance active at a time.                                       |
-| **Container Concurrency**             | `1`                                              | Ensures sequential request handling; avoids contention during cold-start. |
-| **CPU Allocation**                    | `1` vCPU                                         | Enough for a single API; reduces cold-start delays.                       |
-| **CPU Throttling**                    | **Disabled**                                     | Ensures full CPU during cold-start for faster JVM initialization.         |
-| **Memory**                            | `1 GiB`                                          | Prevents GC pressure during startup.                                      |
-| **Startup Probe / Health Check Path** | `/actuator/health/readiness`                     | Detects readiness as early as possible.                                   |
-| **Startup Probe Interval**            | `1 second`                                       | Probe frequently to minimize detection delay.                             |
-| **Startup Probe Timeout**             | `4 seconds`                                      | Fails fast if container not yet ready.                                    |
-| **Startup Probe Failure Threshold**   | `5`                                              | Allow 5 attempts before restart (~5 seconds).                             |
-| **Readiness Probe Path**              | `/actuator/health/readiness`                     | Continuous health verification after startup.                             |
-| **Readiness Probe Interval**          | `5 seconds`                                      | Check app health regularly.                                               |
-| **Readiness Probe Timeout**           | `3 seconds`                                      | Fail fast if unhealthy.                                                   |
-| **Startup CPU Boost**                 | Enabled (`run.googleapis.com/startup-cpu-boost`) | Gives temporary CPU burst during startup to reduce cold-start time.       |
+```python
+import argparse
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
----
+# Parse command-line arguments using -- notation
+parser = argparse.ArgumentParser(description="Create a new MongoDB vCore Entra ID user")
+parser.add_argument("--user-id", required=True, help="Entra ID of the new user")
+parser.add_argument("--role", required=True, help="Role to assign to the new user (e.g., readWrite, dbAdmin)")
+args = parser.parse_args()
 
-### 🔹 Notes for GCP Console
+entra_user_id = args.user_id
+role = args.role
 
-1. Open your **Cloud Run service** → **Edit & Deploy New Revision**.
-2. Under **Container, CPU & Memory**, set:
+# MongoDB vCore connection URI with Entra ID auth
+# Replace <YOUR_COSMOS_ACCOUNT> with your Cosmos DB vCore cluster
+mongo_uri = "mongodb+srv://<YOUR_COSMOS_ACCOUNT>.mongo.cosmos.azure.com:10255/?authMechanism=MONGODB-OIDC&tls=true"
 
-   * CPU: `1 vCPU`
-   * Memory: `1 GiB`
-   * CPU always allocated → toggle **ON**
-3. Under **Autoscaling / Instances**, set:
+try:
+    # Connect using OIDC (Entra ID)
+    client = MongoClient(mongo_uri)
+    db = client['admin']
 
-   * Minimum instances: `0`
-   * Maximum instances: `1`
-4. Under **Container Concurrency**, set: `1`
-5. Under **Advanced settings → Health checks / Probes**:
+    # Command to create user with Entra ID authentication
+    command = {
+        "createUser": entra_user_id,
+        "roles": [{"role": role, "db": "admin"}],
+        "customData": {"authType": "EntraID"}
+    }
 
-   * Startup Probe:
+    result = db.command(command)
+    print(f"User '{entra_user_id}' created successfully with role '{role}': {result}")
 
-     * HTTP path: `/actuator/health/readiness`
-     * Period: `1s`
-     * Timeout: `4s`
-     * Failure threshold: `5`
-   * Readiness Probe:
-
-     * HTTP path: `/actuator/health/readiness`
-     * Period: `5s`
-     * Timeout: `3s`
-6. Enable **Startup CPU Boost** via **Annotations**:
-
-   ```
-   run.googleapis.com/startup-cpu-boost = true
-   ```
+except PyMongoError as e:
+    print(f"Error creating user: {e}")
+```
 
 ---
 
-This configuration ensures **Cloud Run detects readiness as early as possible**, minimizes cold-start latency, and avoids unnecessary restarts.
+### **Usage Example**
 
-If you want, I can create a **ready-to-copy screenshot-style table + step-by-step UI guide** for the console so someone can just apply these settings visually. Do you want me to do that?
+```bash
+python create_mongo_user.py --user-id user@example.com --role readWrite
+```
+
+---
+
+This way, the script is **flexible and self-documenting**.
+
+If you want, I can make an **enhanced version that automatically retrieves the OIDC token from Azure CLI**, so the script can run without manually setting any tokens. This is the typical approach for **Entra ID automation**.
+
+Do you want me to do that next?
