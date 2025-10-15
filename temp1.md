@@ -1,21 +1,24 @@
-Got it! You want a **Python script** that uses **`--` style command-line parameters** instead of positional arguments. Here's an updated version using `argparse`:
+Perfect! We can extend the same script to **support both creating and removing a user** using a `--action` parameter (`create` or `remove`). Here's the updated script:
 
 ---
 
-### **Python Script: `create_mongo_user.py`**
+### **Python Script: `mongo_user_manage.py`**
 
 ```python
 import argparse
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-# Parse command-line arguments using -- notation
-parser = argparse.ArgumentParser(description="Create a new MongoDB vCore Entra ID user")
-parser.add_argument("--user-id", required=True, help="Entra ID of the new user")
-parser.add_argument("--role", required=True, help="Role to assign to the new user (e.g., readWrite, dbAdmin)")
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Manage MongoDB vCore Entra ID users")
+parser.add_argument("--action", required=True, choices=["create", "remove"], help="Action to perform: create or remove a user")
+parser.add_argument("--user-id", required=True, help="Entra ID of the user")
+parser.add_argument("--role", help="Role to assign (required for create)")
+
 args = parser.parse_args()
 
 entra_user_id = args.user_id
+action = args.action
 role = args.role
 
 # MongoDB vCore connection URI with Entra ID auth
@@ -23,36 +26,51 @@ role = args.role
 mongo_uri = "mongodb+srv://<YOUR_COSMOS_ACCOUNT>.mongo.cosmos.azure.com:10255/?authMechanism=MONGODB-OIDC&tls=true"
 
 try:
-    # Connect using OIDC (Entra ID)
     client = MongoClient(mongo_uri)
     db = client['admin']
 
-    # Command to create user with Entra ID authentication
-    command = {
-        "createUser": entra_user_id,
-        "roles": [{"role": role, "db": "admin"}],
-        "customData": {"authType": "EntraID"}
-    }
+    if action == "create":
+        if not role:
+            print("Error: --role is required for creating a user")
+            exit(1)
 
-    result = db.command(command)
-    print(f"User '{entra_user_id}' created successfully with role '{role}': {result}")
+        command = {
+            "createUser": entra_user_id,
+            "roles": [{"role": role, "db": "admin"}],
+            "customData": {"authType": "EntraID"}
+        }
+        result = db.command(command)
+        print(f"User '{entra_user_id}' created successfully with role '{role}': {result}")
+
+    elif action == "remove":
+        command = {
+            "dropUser": entra_user_id
+        }
+        result = db.command(command)
+        print(f"User '{entra_user_id}' removed successfully: {result}")
 
 except PyMongoError as e:
-    print(f"Error creating user: {e}")
+    print(f"Error performing action '{action}' on user '{entra_user_id}': {e}")
 ```
 
 ---
 
-### **Usage Example**
+### **Usage Examples**
+
+**Create a user:**
 
 ```bash
-python create_mongo_user.py --user-id user@example.com --role readWrite
+python mongo_user_manage.py --action create --user-id user@example.com --role readWrite
+```
+
+**Remove a user:**
+
+```bash
+python mongo_user_manage.py --action remove --user-id user@example.com
 ```
 
 ---
 
-This way, the script is **flexible and self-documenting**.
+✅ This single script now handles **both creation and removal** of Entra ID–based MongoDB users.
 
-If you want, I can make an **enhanced version that automatically retrieves the OIDC token from Azure CLI**, so the script can run without manually setting any tokens. This is the typical approach for **Entra ID automation**.
-
-Do you want me to do that next?
+If you want, I can also **add automatic OIDC token retrieval from Azure CLI**, so you won’t have to manage tokens manually—this makes automation fully hands-free. Do you want me to add that?
