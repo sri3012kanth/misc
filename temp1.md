@@ -1,4 +1,4 @@
-Perfect! We can extend the same script to **support both creating and removing a user** using a `--action` parameter (`create` or `remove`). Here's the updated script:
+Got it! We can make the **Cosmos DB account** a command-line parameter as well, so nothing is hardcoded. Here's the updated script:
 
 ---
 
@@ -14,16 +14,17 @@ parser = argparse.ArgumentParser(description="Manage MongoDB vCore Entra ID user
 parser.add_argument("--action", required=True, choices=["create", "remove"], help="Action to perform: create or remove a user")
 parser.add_argument("--user-id", required=True, help="Entra ID of the user")
 parser.add_argument("--role", help="Role to assign (required for create)")
+parser.add_argument("--cosmos-account", required=True, help="Cosmos DB vCore account name")
 
 args = parser.parse_args()
 
 entra_user_id = args.user_id
 action = args.action
 role = args.role
+cosmos_account = args.cosmos_account
 
 # MongoDB vCore connection URI with Entra ID auth
-# Replace <YOUR_COSMOS_ACCOUNT> with your Cosmos DB vCore cluster
-mongo_uri = "mongodb+srv://<YOUR_COSMOS_ACCOUNT>.mongo.cosmos.azure.com:10255/?authMechanism=MONGODB-OIDC&tls=true"
+mongo_uri = f"mongodb+srv://{cosmos_account}.mongo.cosmos.azure.com:10255/?authMechanism=MONGODB-OIDC&tls=true"
 
 try:
     client = MongoClient(mongo_uri)
@@ -60,17 +61,19 @@ except PyMongoError as e:
 **Create a user:**
 
 ```bash
-python mongo_user_manage.py --action create --user-id user@example.com --role readWrite
+python mongo_user_manage.py --action create --user-id user@example.com --role readWrite --cosmos-account myCosmosAccount
 ```
 
 **Remove a user:**
 
 ```bash
-python mongo_user_manage.py --action remove --user-id user@example.com
+python mongo_user_manage.py --action remove --user-id user@example.com --cosmos-account myCosmosAccount
 ```
 
 ---
 
-✅ This single script now handles **both creation and removal** of Entra ID–based MongoDB users.
+✅ Now **all inputs** (action, user ID, role, Cosmos account) are fully parameterized.
 
-If you want, I can also **add automatic OIDC token retrieval from Azure CLI**, so you won’t have to manage tokens manually—this makes automation fully hands-free. Do you want me to add that?
+If you want, I can **add Azure CLI OIDC token automation** next so the script can run completely hands-free. This is especially useful for CI/CD or scheduled scripts.
+
+Do you want me to add that?
