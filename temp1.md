@@ -1,8 +1,13 @@
-Got it! We can make the **Cosmos DB account** a command-line parameter as well, so nothing is hardcoded. Here's the updated script:
+Excellent — let’s enhance the script to include a **`list`** action that fetches and prints all Entra ID–based users in your **MongoDB vCore** instance.
+
+We’ll support three actions now:
+✅ `create` → create a user
+✅ `remove` → drop a user
+✅ `list` → list all users
 
 ---
 
-### **Python Script: `mongo_user_manage.py`**
+### **Final Script: `mongo_user_manage.py`**
 
 ```python
 import argparse
@@ -11,8 +16,9 @@ from pymongo.errors import PyMongoError
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Manage MongoDB vCore Entra ID users")
-parser.add_argument("--action", required=True, choices=["create", "remove"], help="Action to perform: create or remove a user")
-parser.add_argument("--user-id", required=True, help="Entra ID of the user")
+parser.add_argument("--action", required=True, choices=["create", "remove", "list"],
+                    help="Action to perform: create, remove, or list users")
+parser.add_argument("--user-id", help="Entra ID of the user (required for create/remove)")
 parser.add_argument("--role", help="Role to assign (required for create)")
 parser.add_argument("--cosmos-account", required=True, help="Cosmos DB vCore account name")
 
@@ -31,8 +37,8 @@ try:
     db = client['admin']
 
     if action == "create":
-        if not role:
-            print("Error: --role is required for creating a user")
+        if not entra_user_id or not role:
+            print("Error: --user-id and --role are required for creating a user")
             exit(1)
 
         command = {
@@ -41,39 +47,64 @@ try:
             "customData": {"authType": "EntraID"}
         }
         result = db.command(command)
-        print(f"User '{entra_user_id}' created successfully with role '{role}': {result}")
+        print(f"✅ User '{entra_user_id}' created successfully with role '{role}'.")
+        print(result)
 
     elif action == "remove":
-        command = {
-            "dropUser": entra_user_id
-        }
+        if not entra_user_id:
+            print("Error: --user-id is required for removing a user")
+            exit(1)
+
+        command = {"dropUser": entra_user_id}
         result = db.command(command)
-        print(f"User '{entra_user_id}' removed successfully: {result}")
+        print(f"🗑️  User '{entra_user_id}' removed successfully.")
+        print(result)
+
+    elif action == "list":
+        users = db.command("usersInfo")["users"]
+        if not users:
+            print("ℹ️  No users found.")
+        else:
+            print(f"👥 Users in '{cosmos_account}':")
+            for user in users:
+                name = user.get("user")
+                roles = [r["role"] for r in user.get("roles", [])]
+                print(f" - {name} | Roles: {', '.join(roles) if roles else 'None'}")
 
 except PyMongoError as e:
-    print(f"Error performing action '{action}' on user '{entra_user_id}': {e}")
+    print(f"❌ Error performing '{action}' on user '{entra_user_id or 'N/A'}': {e}")
 ```
 
 ---
 
 ### **Usage Examples**
 
-**Create a user:**
+#### 🧩 Create a user
 
 ```bash
 python mongo_user_manage.py --action create --user-id user@example.com --role readWrite --cosmos-account myCosmosAccount
 ```
 
-**Remove a user:**
+#### 🗑️ Remove a user
 
 ```bash
 python mongo_user_manage.py --action remove --user-id user@example.com --cosmos-account myCosmosAccount
 ```
 
+#### 👥 List all users
+
+```bash
+python mongo_user_manage.py --action list --cosmos-account myCosmosAccount
+```
+
 ---
 
-✅ Now **all inputs** (action, user ID, role, Cosmos account) are fully parameterized.
+✅ **Highlights:**
 
-If you want, I can **add Azure CLI OIDC token automation** next so the script can run completely hands-free. This is especially useful for CI/CD or scheduled scripts.
+* Uses Entra ID (`MONGODB-OIDC`) for connection.
+* Requires no hardcoded credentials.
+* Provides clean output for `list` action.
 
-Do you want me to add that?
+---
+
+Would you like me to now extend it so the script **automatically retrieves the Azure AD access token using `az account get-access-token`** (so it works even from a CI/CD agent without interactive login)?
