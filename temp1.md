@@ -1,3 +1,7 @@
+The key is to **describe the product behavior**, not the implementation. Tell Cursor that you want it to act as a **Product Designer + UX Designer**, and that it should **only create a mockup**, not write production code.
+
+Here's a prompt you can use almost verbatim.
+
 # UI Mockup Request – Embedded Template Designer
 
 ## Goal
@@ -194,3 +198,13 @@ Do NOT generate production React code.
 Only create a high-fidelity mockup showing the complete screen and user experience.
 
 Think like a Senior Product Designer creating the first design proposal for stakeholder review.
+
+After Cursor creates the first version, you can iterate with prompts like:
+
+* "Make the canvas larger and reduce the width of the component library."
+* "Show a selected Questionnaire component with its properties visible."
+* "Add floating alignment guides similar to Figma."
+* "Show a live preview pane that updates as components are arranged."
+* "Use our existing design system colors instead of generic Material styling."
+
+This iterative approach usually produces much better design concepts than trying to describe every detail in a single prompt.
