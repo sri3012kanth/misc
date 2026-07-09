@@ -1,150 +1,196 @@
-Below is the **Kotlin version** of the same solution, fully compatible with **Spring Boot 3.x + Azure App Configuration**, supporting **label + prefix filtering** from an API.
+# UI Mockup Request – Embedded Template Designer
+
+## Goal
+
+Design a new screen inside our React application that functions like a lightweight Figma or Retool-style page builder.
+
+This is **NOT** for implementation yet. I only want a high-fidelity UI mockup showing how the screen should look and behave.
 
 ---
 
-## 🎯 API Goal
+## Objective
 
-```
-GET /config?label=prod&prefix=app.
-```
+Allow business users to visually build dynamic questionnaire templates using our existing React components.
 
-Returns **only Azure App Configuration keys** that:
+The designer should let users:
 
-* match the given **label**
-* start with the given **prefix**
+* Drag existing components from a component library.
+* Arrange them on a design canvas.
+* Configure their properties.
+* Save the layout as a reusable template.
+* Later, the saved template will be rendered on another React page using the same components.
 
----
-
-## ✅ Kotlin Implementation
-
----
-
-## 1️⃣ Controller (Kotlin)
-
-```kotlin
-@RestController
-@RequestMapping("/config")
-class AzureAppConfigController(
-    private val environment: ConfigurableEnvironment
-) {
-
-    @GetMapping
-    fun getConfig(
-        @RequestParam label: String,
-        @RequestParam prefix: String
-    ): Map<String, Any?> {
-
-        val result = sortedMapOf<String, Any?>()
-
-        environment.propertySources.forEach { ps ->
-
-            // Only Azure App Configuration sources
-            if (isAzureAppConfigSource(ps) && labelMatches(ps, label)) {
-
-                if (ps is EnumerablePropertySource<*>) {
-                    ps.propertyNames.forEach { key ->
-                        if (key.startsWith(prefix)) {
-                            result[key] = ps.getProperty(key)
-                        }
-                    }
-                }
-            }
-        }
-
-        return result
-    }
-
-    private fun isAzureAppConfigSource(ps: PropertySource<*>): Boolean =
-        ps.name.contains("AzureAppConfiguration", ignoreCase = true)
-
-    private fun labelMatches(ps: PropertySource<*>, label: String): Boolean =
-        ps.name.contains(label, ignoreCase = true)
-}
-```
+The editor should feel similar to Figma, Retool, or Power Apps, but limited to our own design system and components.
 
 ---
 
-## 🧪 Example
+## Main Layout
 
-### Request
+Design a three-column interface.
 
-```
-GET /config?label=prod&prefix=app.
-```
+### Left Panel – Component Library
 
-### Response
+Organize components into categories.
 
-```json
-{
-  "app.feature.enabled": true,
-  "app.db.timeout": 30
-}
-```
+Example categories:
 
----
+* Layout
 
-## 🔁 Handle DEFAULT (no-label) case
+  * Section
+  * Row
+  * Column
+  * Card
+  * Divider
 
-Azure App Configuration default label is **`\0`**
-Spring loads it as:
+* Questionnaire
 
-```
-AzureAppConfigurationPropertySource(...-null)
-```
+  * Questionnaire
+  * Question Group
+  * Question
+  * Repeating Section
 
-### Enhanced matcher:
+* Input Controls
 
-```kotlin
-private fun labelMatches(ps: PropertySource<*>, label: String): Boolean =
-    if (label.equals("default", ignoreCase = true)) {
-        ps.name.contains("null", ignoreCase = true)
-    } else {
-        ps.name.contains(label, ignoreCase = true)
-    }
-```
+  * Text Input
+  * Text Area
+  * Dropdown
+  * Checkbox
+  * Radio Group
+  * Date Picker
+  * Time Picker
+  * Number
+  * Currency
+  * Email
 
----
+* Existing Business Components
 
-## 🔒 Optional: Mask Sensitive Values
+  * Patient Card
+  * Address
+  * Insurance
+  * Diagnosis
+  * Provider
+  * Appointment
 
-```kotlin
-private fun maskIfSensitive(key: String, value: Any?): Any? =
-    if (key.contains(Regex("password|secret|token|key", RegexOption.IGNORE_CASE))) {
-        "****"
-    } else value
-```
-
-Use while putting into result.
+Every item should look draggable.
 
 ---
 
-## 🧠 Why this approach works well
+### Center Panel – Design Canvas
 
-| Benefit              | Reason                               |
-| -------------------- | ------------------------------------ |
-| Azure-native         | Uses already-loaded App Config       |
-| Label aware          | Each label → separate PropertySource |
-| Prefix safe          | Prevents accidental leaks            |
-| Zero Azure SDK calls | No latency / auth issues             |
-| Refresh compatible   | Works with sentinel refresh          |
+This is the largest area.
+
+It should display a visual representation of the page being designed.
+
+Users should be able to:
+
+* Drag components onto the canvas.
+* Rearrange components.
+* Create sections.
+* Create nested layouts.
+* Add questionnaire groups.
+* Select components.
+* See hover and selection outlines.
+* Preview spacing.
+* View responsive layout guides.
+
+Show a sample questionnaire already placed on the canvas.
+
+Example:
+
+Patient Information
+
+First Name
+
+Last Name
+
+Date of Birth
+
+Gender
+
+Insurance
+
+Insurance Company
+
+Policy Number
 
 ---
 
-## ⚠️ Production Notes
+### Right Panel – Properties
 
-* Secure this endpoint (internal use only)
-* Do **not** expose secrets
-* Prefer `app.*` or `feature.*` prefixes
-* Enable App Config refresh
+When a component is selected, display editable properties.
+
+Example for a Text Input:
+
+* Label
+* Placeholder
+* Field Name
+* Required
+* Width
+* Validation
+* Help Text
+* Default Value
+
+Example for a Questionnaire Section:
+
+* Title
+* Description
+* Collapsible
+* Repeatable
+* Number of Columns
 
 ---
 
-If you want, I can also provide:
+## Toolbar
 
-* **Service-based abstraction**
-* **Exact label resolution (not name-based)**
-* **Wildcard prefix support**
-* **Spring Security example**
-* **Unit tests in Kotlin**
+At the top include:
 
-Just tell me 👍
+* Save Template
+* Preview
+* Undo
+* Redo
+* Zoom
+* Device Preview
+* Search Components
+
+---
+
+## Additional Features
+
+Visually represent:
+
+* Drag-and-drop interactions
+* Drop zones
+* Resize handles
+* Alignment guides
+* Empty state for new templates
+* Breadcrumb navigation
+* Template name
+* Status indicator
+
+---
+
+## Visual Style
+
+Create a clean enterprise SaaS interface.
+
+Use inspiration from:
+
+* Figma
+* Retool
+* Microsoft Power Apps
+* Atlassian
+* Material Design 3
+
+The UI should look modern, spacious, and professional.
+
+---
+
+## Important
+
+Do NOT implement functionality.
+
+Do NOT generate production React code.
+
+Only create a high-fidelity mockup showing the complete screen and user experience.
+
+Think like a Senior Product Designer creating the first design proposal for stakeholder review.
